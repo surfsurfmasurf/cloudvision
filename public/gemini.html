@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gemini Live API - WebSocket</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f0f23;
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem;
+    }
+    h1 {
+      font-size: 1.8rem;
+      margin-bottom: 0.5rem;
+      background: linear-gradient(135deg, #4285f4, #ea4335, #fbbc05, #34a853);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .subtitle { color: #888; margin-bottom: 2rem; font-size: 0.9rem; }
+    .badge {
+      display: inline-block;
+      background: #4285f433;
+      color: #4285f4;
+      padding: 2px 10px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .container {
+      width: 100%;
+      max-width: 600px;
+      background: #1a1a2e;
+      border-radius: 16px;
+      padding: 2rem;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 1.5rem;
+      padding: 12px 16px;
+      background: #0f0f23;
+      border-radius: 10px;
+      font-size: 0.85rem;
+    }
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #555;
+      transition: background 0.3s;
+    }
+    .status-dot.connected { background: #34a853; box-shadow: 0 0 8px #34a85388; }
+    .status-dot.connecting { background: #fbbc05; animation: pulse 1s infinite; }
+    .status-dot.error { background: #ea4335; }
+    @keyframes pulse { 50% { opacity: 0.5; } }
+
+    .controls {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      margin-bottom: 1.5rem;
+    }
+    button {
+      padding: 12px 28px;
+      border: none;
+      border-radius: 10px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-start {
+      background: linear-gradient(135deg, #4285f4, #1a73e8);
+      color: white;
+    }
+    .btn-start:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px #4285f455; }
+    .btn-stop {
+      background: #ea4335;
+      color: white;
+    }
+    .btn-stop:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px #ea433555; }
+
+    .visualizer-wrapper {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 120px;
+      margin-bottom: 1.5rem;
+    }
+    canvas {
+      width: 100%;
+      height: 100%;
+      border-radius: 10px;
+      background: #0f0f23;
+    }
+
+    .log {
+      background: #0f0f23;
+      border-radius: 10px;
+      padding: 1rem;
+      max-height: 300px;
+      overflow-y: auto;
+      font-family: 'Courier New', monospace;
+      font-size: 0.8rem;
+      line-height: 1.6;
+    }
+    .log-entry { padding: 2px 0; }
+    .log-entry.info { color: #34a853; }
+    .log-entry.error { color: #ea4335; }
+    .log-entry.event { color: #fbbc05; }
+    .log-entry.ai { color: #4285f4; }
+
+    .nav {
+      margin-top: 2rem;
+      font-size: 0.85rem;
+    }
+    .nav a { color: #4285f4; text-decoration: none; }
+    .nav a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <h1>Gemini Live API</h1>
+  <p class="subtitle"><span class="badge">WebSocket</span> Voice conversation with Gemini</p>
+
+  <div class="container">
+    <div class="status-bar">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">Disconnected</span>
+    </div>
+
+    <div class="controls">
+      <button class="btn-start" id="btnStart" onclick="startSession()">Start</button>
+      <button class="btn-stop" id="btnStop" onclick="stopSession()" disabled>Stop</button>
+    </div>
+
+    <div class="visualizer-wrapper">
+      <canvas id="visualizer"></canvas>
+    </div>
+
+    <div class="log" id="log"></div>
+  </div>
+
+  <p class="nav">OpenAI Realtime API demo &rarr; <a href="/openai.html">openai.html</a></p>
+
+  <script>
+    let ws = null;
+    let localStream = null;
+    let audioContext = null;
+    let analyser = null;
+    let animationId = null;
+    let mediaRecorder = null;
+    let processorNode = null;
+    let sourceNode = null;
+    let playbackCtx = null;
+    let nextPlayTime = 0;
+
+    const log = document.getElementById("log");
+    const statusDot = document.getElementById("statusDot");
+    const statusText = document.getElementById("statusText");
+    const btnStart = document.getElementById("btnStart");
+    const btnStop = document.getElementById("btnStop");
+    const canvas = document.getElementById("visualizer");
+    const canvasCtx = canvas.getContext("2d");
+
+    function addLog(msg, type = "info") {
+      const time = new Date().toLocaleTimeString();
+      const div = document.createElement("div");
+      div.className = `log-entry ${type}`;
+      div.textContent = `[${time}] ${msg}`;
+      log.appendChild(div);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function setStatus(status, text) {
+      statusDot.className = `status-dot ${status}`;
+      statusText.textContent = text;
+    }
+
+    // Convert Float32Array to 16-bit PCM
+    function float32ToPcm16(float32Array) {
+      const pcm16 = new Int16Array(float32Array.length);
+      for (let i = 0; i < float32Array.length; i++) {
+        const s = Math.max(-1, Math.min(1, float32Array[i]));
+        pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+      }
+      return pcm16;
+    }
+
+    // Convert base64 to ArrayBuffer
+    function base64ToArrayBuffer(base64) {
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return bytes.buffer;
+    }
+
+    // ArrayBuffer to base64
+    function arrayBufferToBase64(buffer) {
+      const bytes = new Uint8Array(buffer);
+      let binary = "";
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      return btoa(binary);
+    }
+
+    // Resample audio from source rate to target rate
+    function resample(audioData, sourceRate, targetRate) {
+      if (sourceRate === targetRate) return audioData;
+      const ratio = sourceRate / targetRate;
+      const newLength = Math.round(audioData.length / ratio);
+      const result = new Float32Array(newLength);
+      for (let i = 0; i < newLength; i++) {
+        const srcIndex = i * ratio;
+        const low = Math.floor(srcIndex);
+        const high = Math.min(low + 1, audioData.length - 1);
+        const frac = srcIndex - low;
+        result[i] = audioData[low] * (1 - frac) + audioData[high] * frac;
+      }
+      return result;
+    }
+
+    async function startSession() {
+      try {
+        btnStart.disabled = true;
+        setStatus("connecting", "Connecting...");
+        addLog("Fetching API key...");
+
+        // 1. Get API key
+        const keyRes = await fetch("/api/gemini/key");
+        const keyData = await keyRes.json();
+        if (!keyData.key || keyData.key === "your-gemini-api-key-here") {
+          throw new Error("Gemini API key not configured in .env");
+        }
+        addLog("API key received");
+
+        // 2. Get microphone
+        localStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            sampleRate: 16000,
+            channelCount: 1,
+            echoCancellation: true,
+            noiseSuppression: true,
+          },
+        });
+        addLog("Microphone access granted");
+
+        // 3. Set up audio processing
+        audioContext = new AudioContext({ sampleRate: 16000 });
+        // Resume context if suspended (autoplay policy)
+        if (audioContext.state === "suspended") {
+          await audioContext.resume();
+        }
+
+        sourceNode = audioContext.createMediaStreamSource(localStream);
+
+        // Set up visualizer analyser on mic input
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        sourceNode.connect(analyser);
+
+        // Use ScriptProcessorNode to capture PCM data
+        processorNode = audioContext.createScriptProcessor(4096, 1, 1);
+        sourceNode.connect(processorNode);
+        processorNode.connect(audioContext.destination); // needed for processing to run
+
+        // 4. Connect WebSocket
+        const model = "gemini-2.5-flash-preview-native-audio-dialog";
+        const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${keyData.key}`;
+
+        addLog("Connecting WebSocket...");
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+          addLog("WebSocket connected", "info");
+
+          // Send setup config
+          const setupMsg = {
+            setup: {
+              model: `models/${model}`,
+              generationConfig: {
+                responseModalities: ["AUDIO"],
+              },
+              systemInstruction: {
+                parts: [{ text: "You are a friendly assistant. Respond naturally in the same language the user speaks." }],
+              },
+            },
+          };
+          ws.send(JSON.stringify(setupMsg));
+          addLog("Setup config sent", "event");
+        };
+
+        // Playback context for AI audio (24kHz output from Gemini)
+        playbackCtx = new AudioContext({ sampleRate: 24000 });
+        nextPlayTime = 0;
+
+        ws.onmessage = (event) => {
+          try {
+            const response = JSON.parse(event.data);
+
+            if (response.setupComplete) {
+              addLog("Session ready! Start speaking.", "info");
+              setStatus("connected", "Connected - Speak now");
+              btnStop.disabled = false;
+              startSendingAudio();
+              drawVisualizer();
+              return;
+            }
+
+            if (response.serverContent) {
+              const sc = response.serverContent;
+
+              if (sc.modelTurn && sc.modelTurn.parts) {
+                for (const part of sc.modelTurn.parts) {
+                  if (part.inlineData) {
+                    playAudioChunk(part.inlineData.data);
+                  }
+                  if (part.text) {
+                    addLog(`AI: ${part.text}`, "ai");
+                  }
+                }
+              }
+
+              if (sc.turnComplete) {
+                addLog("AI turn complete", "event");
+              }
+            }
+
+            if (response.toolCall) {
+              addLog("Tool call received (not handled)", "event");
+            }
+          } catch (e) {
+            // ignore parse errors for binary frames etc.
+          }
+        };
+
+        ws.onerror = (err) => {
+          addLog(`WebSocket error: ${err.message || "unknown"}`, "error");
+          setStatus("error", "Error");
+        };
+
+        ws.onclose = (event) => {
+          addLog(`WebSocket closed (code: ${event.code})`, "event");
+          stopSession();
+        };
+      } catch (err) {
+        addLog(`Error: ${err.message}`, "error");
+        setStatus("error", "Error");
+        btnStart.disabled = false;
+        stopSession();
+      }
+    }
+
+    function startSendingAudio() {
+      if (!processorNode || !ws) return;
+
+      processorNode.onaudioprocess = (e) => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+        const inputData = e.inputBuffer.getChannelData(0);
+        // Resample to 16kHz if needed
+        const resampled =
+          audioContext.sampleRate !== 16000
+            ? resample(inputData, audioContext.sampleRate, 16000)
+            : inputData;
+
+        const pcm16 = float32ToPcm16(resampled);
+        const base64Data = arrayBufferToBase64(pcm16.buffer);
+
+        const audioMsg = {
+          realtimeInput: {
+            mediaChunks: [
+              {
+                data: base64Data,
+                mimeType: "audio/pcm;rate=16000",
+              },
+            ],
+          },
+        };
+        ws.send(JSON.stringify(audioMsg));
+      };
+    }
+
+    function playAudioChunk(base64Audio) {
+      if (!playbackCtx) return;
+
+      try {
+        const arrayBuffer = base64ToArrayBuffer(base64Audio);
+        const int16 = new Int16Array(arrayBuffer);
+        const float32 = new Float32Array(int16.length);
+        for (let i = 0; i < int16.length; i++) {
+          float32[i] = int16[i] / 32768;
+        }
+
+        const audioBuffer = playbackCtx.createBuffer(1, float32.length, 24000);
+        audioBuffer.getChannelData(0).set(float32);
+
+        const source = playbackCtx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(playbackCtx.destination);
+
+        // Schedule playback seamlessly
+        const now = playbackCtx.currentTime;
+        if (nextPlayTime < now) {
+          nextPlayTime = now;
+        }
+        source.start(nextPlayTime);
+        nextPlayTime += audioBuffer.duration;
+
+        // Update visualizer with output audio
+        if (!analyser && audioContext) {
+          analyser = playbackCtx.createAnalyser();
+          analyser.fftSize = 256;
+        }
+      } catch (e) {
+        // silently handle audio decode errors
+      }
+    }
+
+    function drawVisualizer() {
+      if (!analyser) return;
+      animationId = requestAnimationFrame(drawVisualizer);
+
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+      analyser.getByteFrequencyData(dataArray);
+
+      canvas.width = canvas.offsetWidth * 2;
+      canvas.height = canvas.offsetHeight * 2;
+      canvasCtx.scale(2, 2);
+
+      const w = canvas.offsetWidth;
+      const h = canvas.offsetHeight;
+      canvasCtx.fillStyle = "#0f0f23";
+      canvasCtx.fillRect(0, 0, w, h);
+
+      const barWidth = (w / bufferLength) * 2.5;
+      let x = 0;
+      const colors = ["#4285f4", "#ea4335", "#fbbc05", "#34a853"];
+
+      for (let i = 0; i < bufferLength; i++) {
+        const barHeight = (dataArray[i] / 255) * h * 0.8;
+        canvasCtx.fillStyle = colors[i % colors.length];
+        canvasCtx.globalAlpha = 0.8;
+        canvasCtx.fillRect(x, h - barHeight, barWidth - 1, barHeight);
+        x += barWidth;
+      }
+      canvasCtx.globalAlpha = 1;
+    }
+
+    function stopSession() {
+      if (ws) {
+        ws.close();
+        ws = null;
+      }
+      if (localStream) {
+        localStream.getTracks().forEach((t) => t.stop());
+        localStream = null;
+      }
+      if (processorNode) {
+        processorNode.onaudioprocess = null;
+        processorNode.disconnect();
+        processorNode = null;
+      }
+      if (sourceNode) {
+        sourceNode.disconnect();
+        sourceNode = null;
+      }
+      if (audioContext) {
+        audioContext.close();
+        audioContext = null;
+        analyser = null;
+      }
+      if (playbackCtx) {
+        playbackCtx.close();
+        playbackCtx = null;
+      }
+      if (animationId) {
+        cancelAnimationFrame(animationId);
+        animationId = null;
+      }
+      nextPlayTime = 0;
+
+      setStatus("", "Disconnected");
+      btnStart.disabled = false;
+      btnStop.disabled = true;
+      addLog("Session ended");
+    }
+  </script>
+</body>
+</html>

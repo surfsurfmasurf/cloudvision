@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OpenAI Realtime API - WebRTC</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f0f23;
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem;
+    }
+    h1 {
+      font-size: 1.8rem;
+      margin-bottom: 0.5rem;
+      background: linear-gradient(135deg, #10a37f, #1a7f64);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .subtitle { color: #888; margin-bottom: 2rem; font-size: 0.9rem; }
+    .badge {
+      display: inline-block;
+      background: #10a37f33;
+      color: #10a37f;
+      padding: 2px 10px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .container {
+      width: 100%;
+      max-width: 600px;
+      background: #1a1a2e;
+      border-radius: 16px;
+      padding: 2rem;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 1.5rem;
+      padding: 12px 16px;
+      background: #0f0f23;
+      border-radius: 10px;
+      font-size: 0.85rem;
+    }
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #555;
+      transition: background 0.3s;
+    }
+    .status-dot.connected { background: #10a37f; box-shadow: 0 0 8px #10a37f88; }
+    .status-dot.connecting { background: #f0ad4e; animation: pulse 1s infinite; }
+    .status-dot.error { background: #e74c3c; }
+    @keyframes pulse { 50% { opacity: 0.5; } }
+
+    .controls {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      margin-bottom: 1.5rem;
+    }
+    button {
+      padding: 12px 28px;
+      border: none;
+      border-radius: 10px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-start {
+      background: linear-gradient(135deg, #10a37f, #1a7f64);
+      color: white;
+    }
+    .btn-start:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px #10a37f55; }
+    .btn-stop {
+      background: #e74c3c;
+      color: white;
+    }
+    .btn-stop:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px #e74c3c55; }
+
+    .visualizer-wrapper {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 120px;
+      margin-bottom: 1.5rem;
+    }
+    canvas {
+      width: 100%;
+      height: 100%;
+      border-radius: 10px;
+      background: #0f0f23;
+    }
+
+    .log {
+      background: #0f0f23;
+      border-radius: 10px;
+      padding: 1rem;
+      max-height: 300px;
+      overflow-y: auto;
+      font-family: 'Courier New', monospace;
+      font-size: 0.8rem;
+      line-height: 1.6;
+    }
+    .log-entry { padding: 2px 0; }
+    .log-entry.info { color: #10a37f; }
+    .log-entry.error { color: #e74c3c; }
+    .log-entry.event { color: #f0ad4e; }
+    .log-entry.ai { color: #74b9ff; }
+
+    .nav {
+      margin-top: 2rem;
+      font-size: 0.85rem;
+    }
+    .nav a { color: #10a37f; text-decoration: none; }
+    .nav a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <h1>OpenAI Realtime API</h1>
+  <p class="subtitle"><span class="badge">WebRTC</span> Voice conversation with GPT-4o</p>
+
+  <div class="container">
+    <div class="status-bar">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">Disconnected</span>
+    </div>
+
+    <div class="controls">
+      <button class="btn-start" id="btnStart" onclick="startSession()">Start</button>
+      <button class="btn-stop" id="btnStop" onclick="stopSession()" disabled>Stop</button>
+    </div>
+
+    <div class="visualizer-wrapper">
+      <canvas id="visualizer"></canvas>
+    </div>
+
+    <div class="log" id="log"></div>
+  </div>
+
+  <p class="nav">Gemini Live API demo &rarr; <a href="/gemini.html">gemini.html</a></p>
+
+  <audio id="remoteAudio" autoplay></audio>
+
+  <script>
+    let pc = null;
+    let localStream = null;
+    let audioContext = null;
+    let analyser = null;
+    let animationId = null;
+
+    const log = document.getElementById("log");
+    const statusDot = document.getElementById("statusDot");
+    const statusText = document.getElementById("statusText");
+    const btnStart = document.getElementById("btnStart");
+    const btnStop = document.getElementById("btnStop");
+    const canvas = document.getElementById("visualizer");
+    const canvasCtx = canvas.getContext("2d");
+
+    function addLog(msg, type = "info") {
+      const time = new Date().toLocaleTimeString();
+      const div = document.createElement("div");
+      div.className = `log-entry ${type}`;
+      div.textContent = `[${time}] ${msg}`;
+      log.appendChild(div);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function setStatus(status, text) {
+      statusDot.className = `status-dot ${status}`;
+      statusText.textContent = text;
+    }
+
+    async function startSession() {
+      try {
+        btnStart.disabled = true;
+        setStatus("connecting", "Connecting...");
+        addLog("Requesting ephemeral token...");
+
+        // 1. Get ephemeral token from our server
+        const tokenRes = await fetch("/api/openai/token", { method: "POST" });
+        const tokenData = await tokenRes.json();
+
+        if (!tokenRes.ok) {
+          throw new Error(tokenData.error?.message || JSON.stringify(tokenData));
+        }
+
+        const ephemeralKey = tokenData.client_secret?.value;
+        if (!ephemeralKey) throw new Error("No ephemeral key received");
+        addLog("Ephemeral token received");
+
+        // 2. Get microphone access
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        addLog("Microphone access granted");
+
+        // 3. Create RTCPeerConnection
+        pc = new RTCPeerConnection({
+          iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+        });
+
+        // 4. Add audio track
+        localStream.getTracks().forEach((track) => {
+          pc.addTrack(track, localStream);
+        });
+
+        // 5. Handle remote audio
+        const remoteAudio = document.getElementById("remoteAudio");
+        pc.ontrack = (event) => {
+          addLog("Receiving AI audio stream", "ai");
+          remoteAudio.srcObject = event.streams[0];
+          setupVisualizer(event.streams[0]);
+        };
+
+        // 6. Data channel for events
+        const dc = pc.createDataChannel("oai-events");
+        dc.onopen = () => addLog("Data channel opened", "event");
+        dc.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+            handleRealtimeEvent(msg, dc);
+          } catch (e) {
+            // ignore parse errors
+          }
+        };
+
+        // 7. Create SDP offer
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        addLog("SDP offer created");
+
+        // 8. Send SDP to OpenAI
+        const sdpRes = await fetch(
+          "https://api.openai.com/v1/realtime/calls",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${ephemeralKey}`,
+              "Content-Type": "application/sdp",
+            },
+            body: offer.sdp,
+          }
+        );
+
+        if (!sdpRes.ok) {
+          const err = await sdpRes.text();
+          throw new Error(`SDP exchange failed: ${err}`);
+        }
+
+        const answerSdp = await sdpRes.text();
+        await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+        addLog("WebRTC connection established!");
+
+        setStatus("connected", "Connected");
+        btnStop.disabled = false;
+
+        pc.oniceconnectionstatechange = () => {
+          addLog(`ICE state: ${pc.iceConnectionState}`, "event");
+          if (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed") {
+            stopSession();
+          }
+        };
+      } catch (err) {
+        addLog(`Error: ${err.message}`, "error");
+        setStatus("error", "Error");
+        btnStart.disabled = false;
+        stopSession();
+      }
+    }
+
+    function handleRealtimeEvent(msg, dc) {
+      const type = msg.type;
+      switch (type) {
+        case "session.created":
+          addLog("Session created", "event");
+          break;
+        case "session.updated":
+          addLog("Session updated", "event");
+          break;
+        case "input_audio_buffer.speech_started":
+          addLog("Speech detected...", "event");
+          break;
+        case "input_audio_buffer.speech_stopped":
+          addLog("Speech ended", "event");
+          break;
+        case "response.audio_transcript.delta":
+          if (msg.delta) {
+            appendTranscript(msg.delta, "ai");
+          }
+          break;
+        case "response.audio_transcript.done":
+          finalizeTranscript("ai");
+          break;
+        case "conversation.item.input_audio_transcription.completed":
+          if (msg.transcript) {
+            addLog(`You: ${msg.transcript}`, "info");
+          }
+          break;
+        case "response.done":
+          addLog("Response complete", "event");
+          break;
+        case "error":
+          addLog(`API Error: ${JSON.stringify(msg.error)}`, "error");
+          break;
+      }
+    }
+
+    let currentTranscript = "";
+    let currentTranscriptEl = null;
+
+    function appendTranscript(delta, type) {
+      if (!currentTranscriptEl) {
+        currentTranscriptEl = document.createElement("div");
+        currentTranscriptEl.className = `log-entry ${type}`;
+        currentTranscriptEl.textContent = "AI: ";
+        log.appendChild(currentTranscriptEl);
+      }
+      currentTranscript += delta;
+      currentTranscriptEl.textContent = "AI: " + currentTranscript;
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function finalizeTranscript() {
+      currentTranscript = "";
+      currentTranscriptEl = null;
+    }
+
+    function setupVisualizer(stream) {
+      audioContext = new AudioContext();
+      analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
+      drawVisualizer();
+    }
+
+    function drawVisualizer() {
+      if (!analyser) return;
+      animationId = requestAnimationFrame(drawVisualizer);
+
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+      analyser.getByteFrequencyData(dataArray);
+
+      canvas.width = canvas.offsetWidth * 2;
+      canvas.height = canvas.offsetHeight * 2;
+      canvasCtx.scale(2, 2);
+
+      const w = canvas.offsetWidth;
+      const h = canvas.offsetHeight;
+      canvasCtx.fillStyle = "#0f0f23";
+      canvasCtx.fillRect(0, 0, w, h);
+
+      const barWidth = (w / bufferLength) * 2.5;
+      let x = 0;
+
+      for (let i = 0; i < bufferLength; i++) {
+        const barHeight = (dataArray[i] / 255) * h * 0.8;
+        const gradient = canvasCtx.createLinearGradient(0, h, 0, h - barHeight);
+        gradient.addColorStop(0, "#10a37f");
+        gradient.addColorStop(1, "#1a7f64");
+        canvasCtx.fillStyle = gradient;
+        canvasCtx.fillRect(x, h - barHeight, barWidth - 1, barHeight);
+        x += barWidth;
+      }
+    }
+
+    function stopSession() {
+      if (pc) {
+        pc.close();
+        pc = null;
+      }
+      if (localStream) {
+        localStream.getTracks().forEach((t) => t.stop());
+        localStream = null;
+      }
+      if (audioContext) {
+        audioContext.close();
+        audioContext = null;
+        analyser = null;
+      }
+      if (animationId) {
+        cancelAnimationFrame(animationId);
+        animationId = null;
+      }
+      const remoteAudio = document.getElementById("remoteAudio");
+      remoteAudio.srcObject = null;
+
+      setStatus("", "Disconnected");
+      btnStart.disabled = false;
+      btnStop.disabled = true;
+      addLog("Session ended");
+    }
+  </script>
+</body>
+</html>
