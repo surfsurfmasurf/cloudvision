@@ -5,6 +5,7 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.static("public"));
 
 const ALLOWED_HOST = "testme0.akamaized-staging.net";
+const CDN_HOST_HEADER = "testme0.akamaized.net"; // Host header sent to CDN
 
 app.post("/api/cdn-proxy", async (req, res) => {
   const { url, method = "GET", headers = {}, body, timeoutMs = 10000, spoofIp } = req.body;
@@ -13,8 +14,14 @@ app.post("/api/cdn-proxy", async (req, res) => {
     return res.status(400).json({ error: `Only ${ALLOWED_HOST} URLs are allowed` });
   }
 
-  // Build final headers: inject IP spoofing headers if spoofIp provided
-  const finalHeaders = { ...headers };
+  // Build final headers:
+  // 1. Start with caller-supplied headers
+  // 2. Always override Host to the production CDN hostname
+  // 3. Inject IP spoofing headers if spoofIp provided
+  const finalHeaders = {
+    ...headers,
+    "Host": CDN_HOST_HEADER,
+  };
   if (spoofIp) {
     finalHeaders["True-Client-IP"] = spoofIp;
     finalHeaders["X-Forwarded-For"] = spoofIp;
@@ -35,7 +42,8 @@ app.post("/api/cdn-proxy", async (req, res) => {
       fetchOptions.body = body;
     }
 
-    console.log(`[proxy] ${method} ${url} | spoofIp=${spoofIp || "none"}`);
+    console.log(`[proxy] ${method} ${url}`);
+    console.log(`        Host: ${CDN_HOST_HEADER} | spoofIp: ${spoofIp || "none"}`);
     const response = await fetch(url, fetchOptions);
     clearTimeout(timer);
 
@@ -48,7 +56,7 @@ app.post("/api/cdn-proxy", async (req, res) => {
       statusText: response.statusText,
       headers: responseHeaders,
       body: responseBody,
-      requestedHeaders: finalHeaders, // echo back what we actually sent
+      requestedHeaders: finalHeaders,
     });
   } catch (error) {
     clearTimeout(timer);
@@ -68,4 +76,6 @@ app.post("/api/cdn-proxy", async (req, res) => {
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`CDN Error Tester running at http://localhost:${PORT}`);
+  console.log(`  Connect to : testme0.akamaized-staging.net`);
+  console.log(`  Host header: testme0.akamaized.net`);
 });
