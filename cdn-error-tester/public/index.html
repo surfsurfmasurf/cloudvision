@@ -320,16 +320,29 @@
 <header>
   <h1>CDN Error Generator</h1>
   <p class="subtitle">Simulate Akamai CDN error scenarios and collect Ref IDs from <code>Akamai-GRN0</code> response header</p>
-  <div class="target-pill">
-    <span class="label">Target:</span>
-    https://testme0.akamaized.net
+  <div style="display:flex;gap:0.6rem;flex-wrap:wrap;align-items:center">
+    <div class="target-pill">
+      <span class="label">CDN Host:</span>
+      testme0.akamaized.net
+    </div>
+    <span style="color:#374151;font-size:0.75rem">DNS via</span>
+    <div class="target-pill" style="color:#c4b5fd">
+      <span class="label">Staging:</span>
+      testme0.akamaized-staging.net
+    </div>
+    <span style="color:#374151;font-size:0.75rem">→</span>
+    <div class="target-pill" style="color:#fbbf24">
+      <span class="label">Edge IP:</span>
+      <span id="edgeIpVal">resolving…</span>
+      <button class="copy-btn" id="edgeIpCopy" style="display:none" onclick="copyText(document.getElementById('edgeIpVal').textContent)">Copy</button>
+    </div>
   </div>
 </header>
 
 <div class="ip-bar">
   <label>Spoof Client IP:</label>
-  <input class="ip-input" id="spoofIp" type="text" value="23.50.60.214" placeholder="e.g. 23.50.60.214" />
-  <span class="ip-hint">Injected as <span class="ip-badge">True-Client-IP</span> <span class="ip-badge">X-Forwarded-For</span> <span class="ip-badge">X-Real-IP</span> on every CDN request</span>
+  <input class="ip-input" id="spoofIp" type="text" placeholder="e.g. 1.2.3.4 (optional)" />
+  <span class="ip-hint">Injected as <span class="ip-badge">True-Client-IP</span> <span class="ip-badge">X-Forwarded-For</span> <span class="ip-badge">X-Real-IP</span></span>
 </div>
 
 <div class="toolbar">
@@ -671,11 +684,11 @@ function getSpoofIp() {
   return document.getElementById('spoofIp').value.trim() || null;
 }
 
-async function proxyRequest(url, method, headers, body, timeoutMs = 10000) {
+async function proxyRequest(path, method, headers, body, timeoutMs = 10000) {
   const resp = await fetch('/api/cdn-proxy', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url, method, headers, body, timeoutMs, spoofIp: getSpoofIp() }),
+    body: JSON.stringify({ path, method, headers, body, timeoutMs, spoofIp: getSpoofIp() }),
   });
   return resp.json();
 }
@@ -693,14 +706,13 @@ async function runOne(id) {
   resEl.innerHTML = '<span class="spinner"></span> Sending request…';
   btn.disabled = true;
 
-  const url = BASE + s.path;
   let status = null, refId = null, netErr = null, lastRequestedHeaders = null;
 
   try {
     let data;
     if (s.repeat) {
       const reqs = Array.from({ length: s.repeat }, () =>
-        proxyRequest(url, s.method, s.headers, s.body, s.timeoutMs)
+        proxyRequest(s.path, s.method, s.headers, s.body, s.timeoutMs)
       );
       const responses = await Promise.all(reqs);
       // pick the most interesting response (highest status or with refId)
@@ -718,7 +730,7 @@ async function runOne(id) {
         }
       }
     } else {
-      data = await proxyRequest(url, s.method, s.headers, s.body, s.timeoutMs);
+      data = await proxyRequest(s.path, s.method, s.headers, s.body, s.timeoutMs);
       status = data.status;
       refId = data.headers?.[GRN_HEADER] || extractRefFromBody(data.body);
       if (data.isTimeout || data.networkError) netErr = data.networkError || 'Timeout';
@@ -868,6 +880,17 @@ function showToast(msg, color = '#22c55e') {
 // ── Init ──────────────────────────────────────────────────────────────────────
 renderTabs();
 renderCards();
+
+// Resolve edge IP on load
+(async () => {
+  try {
+    const data = await fetch('/api/edge-ip').then(r => r.json());
+    document.getElementById('edgeIpVal').textContent = data.ip;
+    document.getElementById('edgeIpCopy').style.display = 'inline';
+  } catch (e) {
+    document.getElementById('edgeIpVal').textContent = 'resolve failed';
+  }
+})();
 </script>
 </body>
 </html>

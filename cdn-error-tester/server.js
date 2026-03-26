@@ -1,71 +1,118 @@
 import express from "express";
+import https from "https";
+import dns from "dns/promises";
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
 app.use(express.static("public"));
 
-const ALLOWED_HOST = "testme0.akamaized.net";
+const STAGING_HOST = "testme0.akamaized-staging.net"; // DNS resolved to get edge IP
+const CDN_HOST     = "testme0.akamaized.net";          // Host header + SNI
+
+// Resolve staging hostname once and cache
+let edgeIp = null;
+async function getEdgeIp() {
+  if (edgeIp) return edgeIp;
+  const result = await dns.lookup(STAGING_HOST);
+  edgeIp = result.address;
+  console.log(`[dns] ${STAGING_HOST} → ${edgeIp}`);
+  return edgeIp;
+}
+
+// Expose resolved IP to the UI
+app.get("/api/edge-ip", async (req, res) => {
+  try {
+    edgeIp = null; // force re-resolve on each call
+    const ip = await getEdgeIp();
+    res.json({ ip, stagingHost: STAGING_HOST, cdnHost: CDN_HOST });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+function makeRequest({ ip, path, method, headers, body, timeoutMs }) {
+  return new Promise((resolve, reject) => {
+    const url = new URL(`https://${CDN_HOST}${path}`);
+
+    const options = {
+      hostname: ip,          // connect to staging edge IP directly
+      port: 443,
+      path: url.pathname + url.search,
+      method,
+      headers: {
+        ...headers,
+        "Host": CDN_HOST,   // override Host
+      },
+      servername: CDN_HOST, // TLS SNI
+      rejectUnauthorized: true,
+      timeout: timeoutMs,
+    };
+
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", chunk => { data += chunk; });
+      res.on("end", () => {
+        resolve({
+          status: res.statusCode,
+          statusText: res.statusMessage,
+          headers: res.headers,
+          body: data,
+          requestedHeaders: options.headers,
+          connectedIp: ip,
+        });
+      });
+    });
+
+    req.on("timeout", () => {
+      req.destroy();
+      reject(Object.assign(new Error("Timeout"), { isTimeout: true }));
+    });
+    req.on("error", reject);
+
+    if (body && !["GET", "HEAD"].includes(method.toUpperCase())) {
+      req.write(body);
+    }
+    req.end();
+  });
+}
 
 app.post("/api/cdn-proxy", async (req, res) => {
-  const { url, method = "GET", headers = {}, body, timeoutMs = 10000, spoofIp } = req.body;
-
-  if (!url || !url.includes(ALLOWED_HOST)) {
-    return res.status(400).json({ error: `Only ${ALLOWED_HOST} URLs are allowed` });
-  }
+  const { path = "/rsa", method = "GET", headers = {}, body, timeoutMs = 10000, spoofIp } = req.body;
 
   const finalHeaders = { ...headers };
   if (spoofIp) {
     finalHeaders["True-Client-IP"] = spoofIp;
     finalHeaders["X-Forwarded-For"] = spoofIp;
-    finalHeaders["X-Real-IP"] = spoofIp;
+    finalHeaders["X-Real-IP"]       = spoofIp;
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
   try {
-    const fetchOptions = {
-      method,
-      headers: finalHeaders,
-      redirect: "manual",
-      signal: controller.signal,
-    };
-    if (body !== undefined && !["GET", "HEAD"].includes(method.toUpperCase())) {
-      fetchOptions.body = body;
-    }
+    const ip = await getEdgeIp();
+    console.log(`[proxy] ${method} https://${CDN_HOST}${path} → ${ip} | spoofIp: ${spoofIp || "none"}`);
 
-    console.log(`[proxy] ${method} ${url} | spoofIp: ${spoofIp || "none"}`);
-    const response = await fetch(url, fetchOptions);
-    clearTimeout(timer);
-
-    const responseBody = await response.text();
-    const responseHeaders = {};
-    response.headers.forEach((value, key) => { responseHeaders[key] = value; });
-
-    res.json({
-      status: response.status,
-      statusText: response.statusText,
-      headers: responseHeaders,
-      body: responseBody,
-      requestedHeaders: finalHeaders,
-    });
+    const result = await makeRequest({ ip, path, method, headers: finalHeaders, body, timeoutMs });
+    res.json(result);
   } catch (error) {
-    clearTimeout(timer);
-    const isTimeout = error.name === "AbortError";
-    res.status(200).json({
+    res.json({
       status: 0,
-      statusText: isTimeout ? "Timeout" : "Network Error",
+      statusText: error.isTimeout ? "Timeout" : "Network Error",
       headers: {},
       body: "",
       networkError: error.message,
-      isTimeout,
+      isTimeout: !!error.isTimeout,
       requestedHeaders: finalHeaders,
     });
   }
 });
 
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`CDN Error Tester running at http://localhost:${PORT}`);
-  console.log(`  Target: testme0.akamaized.net`);
+  try {
+    const ip = await getEdgeIp();
+    console.log(`  Edge IP : ${ip} (via ${STAGING_HOST})`);
+    console.log(`  CDN Host: ${CDN_HOST}`);
+  } catch (e) {
+    console.warn(`  DNS resolve failed: ${e.message}`);
+  }
 });
