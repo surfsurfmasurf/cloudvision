@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CDN Error Generator</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f0f1a;
+      color: #e0e0e0;
+      min-height: 100vh;
+      padding: 2rem;
+    }
+    header { margin-bottom: 1.5rem; }
+    h1 {
+      font-size: 1.7rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #f97316, #ef4444);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 0.3rem;
+    }
+    .subtitle { color: #6b7280; font-size: 0.875rem; margin-bottom: 0.75rem; }
+    .target-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: #1a1a2e;
+      border: 1px solid #2d2d4a;
+      border-radius: 20px;
+      padding: 0.35rem 0.9rem;
+      font-size: 0.8rem;
+      font-family: monospace;
+      color: #7dd3fc;
+    }
+    .target-pill .label { color: #4b5563; }
+
+    .toolbar {
+      display: flex;
+      gap: 0.6rem;
+      margin-bottom: 1.25rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .btn {
+      padding: 0.45rem 1.1rem;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.82rem;
+      font-weight: 600;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    .btn:hover:not(:disabled) { opacity: 0.85; transform: translateY(-1px); }
+    .btn:active:not(:disabled) { transform: translateY(0); }
+    .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .btn-run   { background: #f97316; color: #fff; }
+    .btn-clear { background: #374151; color: #d1d5db; }
+    .btn-export{ background: #1d4ed8; color: #fff; }
+
+    /* progress */
+    .progress-wrap {
+      display: none;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 1.25rem;
+    }
+    .progress-wrap.visible { display: flex; }
+    .progress-track {
+      flex: 1;
+      height: 4px;
+      background: #1e1e3a;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #f97316, #ef4444);
+      border-radius: 2px;
+      transition: width 0.25s;
+    }
+    .progress-text { font-size: 0.75rem; color: #6b7280; white-space: nowrap; }
+
+    /* category tabs */
+    .tabs {
+      display: flex;
+      gap: 0.4rem;
+      margin-bottom: 1.25rem;
+      flex-wrap: wrap;
+    }
+    .tab {
+      padding: 0.3rem 0.75rem;
+      border-radius: 4px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid transparent;
+      background: #1a1a2e;
+      color: #6b7280;
+      transition: all 0.15s;
+    }
+    .tab.active { border-color: #f97316; color: #f97316; }
+    .tab:hover:not(.active) { color: #d1d5db; border-color: #374151; }
+
+    /* scenario grid */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 0.875rem;
+      margin-bottom: 2rem;
+    }
+    .card {
+      background: #141421;
+      border: 1px solid #22223a;
+      border-radius: 10px;
+      padding: 0.9rem;
+      transition: border-color 0.2s;
+    }
+    .card.running  { border-color: #f97316; }
+    .card.done-ok  { border-color: #22c55e; }
+    .card.done-err { border-color: #ef4444; }
+    .card.hidden   { display: none; }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 0.4rem;
+    }
+    .card-name { font-weight: 600; font-size: 0.875rem; color: #f1f5f9; }
+    .card-desc { font-size: 0.75rem; color: #6b7280; margin-bottom: 0.6rem; line-height: 1.4; }
+    .card-tags { display: flex; gap: 0.35rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
+    .tag {
+      font-size: 0.68rem;
+      padding: 0.18rem 0.45rem;
+      border-radius: 3px;
+      font-family: monospace;
+      font-weight: 700;
+    }
+    .t-method  { background: #1e3a5f; color: #7dd3fc; }
+    .t-expect  { background: #2d1b1b; color: #fca5a5; }
+    .t-path    { background: #1a2d1a; color: #86efac; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .t-cat     { background: #1e1b33; color: #c4b5fd; }
+
+    .card-result {
+      display: none;
+      margin-top: 0.5rem;
+      padding: 0.6rem 0.7rem;
+      background: #0a0a14;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-family: monospace;
+    }
+    .card-result.visible { display: block; }
+    .result-line { margin-bottom: 0.25rem; }
+    .ref-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 0.35rem;
+      padding-top: 0.35rem;
+      border-top: 1px solid #1e1e3a;
+    }
+    .ref-label { color: #4b5563; }
+    .ref-value { color: #fbbf24; flex: 1; word-break: break-all; }
+    .copy-btn {
+      background: #27272a;
+      border: none;
+      color: #9ca3af;
+      padding: 0.15rem 0.45rem;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 0.68rem;
+      white-space: nowrap;
+    }
+    .copy-btn:hover { background: #3f3f46; color: #e5e7eb; }
+    .btn-run-card {
+      padding: 0.25rem 0.65rem;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.72rem;
+      font-weight: 600;
+      background: #27272a;
+      color: #d1d5db;
+      white-space: nowrap;
+    }
+    .btn-run-card:hover:not(:disabled) { background: #3f3f46; }
+    .btn-run-card:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    /* status badges */
+    .badge {
+      display: inline-block;
+      font-size: 0.72rem;
+      padding: 0.18rem 0.5rem;
+      border-radius: 3px;
+      font-weight: 700;
+      font-family: monospace;
+    }
+    .s-2xx { background: #14532d; color: #86efac; }
+    .s-3xx { background: #1e3a5f; color: #93c5fd; }
+    .s-4xx { background: #7f1d1d; color: #fca5a5; }
+    .s-5xx { background: #431407; color: #fdba74; }
+    .s-0xx { background: #312e81; color: #c4b5fd; }
+
+    /* spinner */
+    .spinner {
+      display: inline-block;
+      width: 11px; height: 11px;
+      border: 2px solid #f9731633;
+      border-top-color: #f97316;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      vertical-align: middle;
+      margin-right: 4px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* results table */
+    .section-title {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #94a3b8;
+      margin-bottom: 0.75rem;
+    }
+    .table-wrap {
+      overflow-x: auto;
+      border-radius: 8px;
+      border: 1px solid #1e1e3a;
+      margin-bottom: 2rem;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+    thead tr { background: #141421; }
+    th {
+      padding: 0.65rem 1rem;
+      text-align: left;
+      color: #6b7280;
+      font-weight: 600;
+      white-space: nowrap;
+      border-bottom: 1px solid #1e1e3a;
+    }
+    tbody tr { border-top: 1px solid #18182a; transition: background 0.1s; }
+    tbody tr:hover { background: #141421; }
+    td { padding: 0.55rem 1rem; vertical-align: middle; }
+    td.ref-cell { font-family: monospace; color: #fbbf24; font-size: 0.73rem; }
+    td.no-ref { color: #374151; font-style: italic; font-size: 0.73rem; }
+    .empty-row td { text-align: center; color: #374151; padding: 2rem; font-size: 0.82rem; }
+
+    /* toast */
+    .toast {
+      position: fixed;
+      bottom: 1.5rem; right: 1.5rem;
+      padding: 0.55rem 1rem;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 0.2s, transform 0.2s;
+      pointer-events: none;
+      z-index: 999;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>CDN Error Generator</h1>
+  <p class="subtitle">Simulate Akamai CDN error scenarios and collect Ref IDs from <code>Akamai-GRN0</code> response header</p>
+  <div class="target-pill">
+    <span class="label">Target:</span>
+    https://testme0.akamaized-staging.net
+  </div>
+</header>
+
+<div class="toolbar">
+  <button class="btn btn-run"   id="runAllBtn" onclick="runAll()">&#9654; Run All Tests</button>
+  <button class="btn btn-clear" onclick="clearAll()">Clear Results</button>
+  <button class="btn btn-export" onclick="exportJSON()">Export JSON</button>
+</div>
+
+<div class="progress-wrap" id="progressWrap">
+  <div class="progress-track"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+  <span class="progress-text" id="progressText">0 / 0</span>
+</div>
+
+<div class="tabs" id="tabs"></div>
+<div class="grid" id="grid"></div>
+
+<p class="section-title">Collected Ref IDs (Akamai-GRN0)</p>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Scenario</th>
+        <th>Category</th>
+        <th>Status</th>
+        <th>Ref ID (Akamai-GRN0)</th>
+        <th>Timestamp</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="tableBody">
+      <tr class="empty-row"><td colspan="7">No results yet — run tests to collect Ref IDs</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const BASE = 'https://testme0.akamaized-staging.net';
+const GRN_HEADER = 'akamai-grn0'; // headers are lowercased
+
+const SCENARIOS = [
+  // ── 2xx ──────────────────────────────────────────────────────────────
+  {
+    id: 'ok_baseline',
+    cat: '2xx',
+    name: 'Baseline GET',
+    desc: 'Normal GET request to verify the endpoint is reachable.',
+    method: 'GET', path: '/rsa', headers: {}, expect: '200',
+  },
+  {
+    id: 'ok_head',
+    cat: '2xx',
+    name: 'HEAD Request',
+    desc: 'HEAD method — no body expected in response.',
+    method: 'HEAD', path: '/rsa', headers: {}, expect: '200',
+  },
+
+  // ── 3xx ──────────────────────────────────────────────────────────────
+  {
+    id: 'redirect_slash',
+    cat: '3xx',
+    name: 'Trailing Slash Redirect',
+    desc: 'Requests without trailing slash sometimes cause a 301/302 redirect.',
+    method: 'GET', path: '/rsa/', headers: {}, expect: '3xx',
+  },
+
+  // ── 4xx ──────────────────────────────────────────────────────────────
+  {
+    id: '400_bad_host',
+    cat: '4xx',
+    name: '400 Bad Host Header',
+    desc: 'Malformed Host header value.',
+    method: 'GET', path: '/rsa', headers: { 'Host': 'invalid..host' }, expect: '400',
+  },
+  {
+    id: '400_malformed_te',
+    cat: '4xx',
+    name: '400 Invalid Transfer-Encoding',
+    desc: 'Unsupported Transfer-Encoding value that may confuse the edge.',
+    method: 'POST', path: '/rsa', headers: { 'Transfer-Encoding': 'invalid-encoding', 'Content-Type': 'application/octet-stream' }, expect: '400',
+  },
+  {
+    id: '403_no_auth',
+    cat: '4xx',
+    name: '403 No Authorization',
+    desc: 'Request without any authorization credentials.',
+    method: 'GET', path: '/rsa', headers: {}, expect: '403',
+  },
+  {
+    id: '403_bad_token',
+    cat: '4xx',
+    name: '403 Invalid Bearer Token',
+    desc: 'Expired or tampered JWT-style token in Authorization header.',
+    method: 'GET', path: '/rsa', headers: { 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiJ9.INVALID.SIGNATURE' }, expect: '403',
+  },
+  {
+    id: '403_blocked_ip',
+    cat: '4xx',
+    name: '403 Blocked IP (X-Forwarded-For)',
+    desc: 'Spoofed X-Forwarded-For with a known-blocked address range.',
+    method: 'GET', path: '/rsa', headers: { 'X-Forwarded-For': '10.0.0.1' }, expect: '403',
+  },
+  {
+    id: '404_not_found',
+    cat: '4xx',
+    name: '404 Not Found',
+    desc: 'Path that does not exist on the origin.',
+    method: 'GET', path: '/rsa/no-such-resource-xyz9999', headers: {}, expect: '404',
+  },
+  {
+    id: '404_deep_path',
+    cat: '4xx',
+    name: '404 Deep Path',
+    desc: 'Deeply nested non-existent path.',
+    method: 'GET', path: '/rsa/a/b/c/d/e/f/g/not-here', headers: {}, expect: '404',
+  },
+  {
+    id: '405_delete',
+    cat: '4xx',
+    name: '405 Method Not Allowed (DELETE)',
+    desc: 'DELETE method on a read-only resource.',
+    method: 'DELETE', path: '/rsa', headers: {}, expect: '405',
+  },
+  {
+    id: '405_put',
+    cat: '4xx',
+    name: '405 Method Not Allowed (PUT)',
+    desc: 'PUT method on a non-writable endpoint.',
+    method: 'PUT', path: '/rsa', headers: { 'Content-Type': 'application/json' }, body: '{}', expect: '405',
+  },
+  {
+    id: '405_patch',
+    cat: '4xx',
+    name: '405 Method Not Allowed (PATCH)',
+    desc: 'PATCH method not supported.',
+    method: 'PATCH', path: '/rsa', headers: { 'Content-Type': 'application/json' }, body: '{}', expect: '405',
+  },
+  {
+    id: '405_trace',
+    cat: '4xx',
+    name: '405 TRACE Method',
+    desc: 'TRACE is commonly blocked by CDN/WAF for security.',
+    method: 'TRACE', path: '/rsa', headers: {}, expect: '405',
+  },
+  {
+    id: '406_not_acceptable',
+    cat: '4xx',
+    name: '406 Not Acceptable',
+    desc: 'Client requests a content type the server cannot produce.',
+    method: 'GET', path: '/rsa', headers: { 'Accept': 'application/x-proprietary-format-unknown' }, expect: '406',
+  },
+  {
+    id: '408_timeout',
+    cat: '4xx',
+    name: '408 Request Timeout (slow client)',
+    desc: 'Simulate a client timeout by using an extremely short timeout window.',
+    method: 'POST', path: '/rsa', headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': '999999' }, expect: '408', timeoutMs: 1,
+  },
+  {
+    id: '412_precondition',
+    cat: '4xx',
+    name: '412 Precondition Failed',
+    desc: 'If-Match header with a wrong ETag forces a precondition failure.',
+    method: 'GET', path: '/rsa', headers: { 'If-Match': '"wrong-etag-value-00000"' }, expect: '412',
+  },
+  {
+    id: '413_large_body',
+    cat: '4xx',
+    name: '413 Payload Too Large',
+    desc: 'POST with a body that exceeds the CDN payload limit.',
+    method: 'POST', path: '/rsa', headers: { 'Content-Type': 'application/octet-stream' }, body: 'X'.repeat(20 * 1024 * 1024), expect: '413',
+  },
+  {
+    id: '414_long_url',
+    cat: '4xx',
+    name: '414 URI Too Long',
+    desc: 'Query string padded to ~8 KB to exceed the max URI length.',
+    method: 'GET', path: '/rsa?' + 'a'.repeat(8000), headers: {}, expect: '414',
+  },
+  {
+    id: '415_unsupported_media',
+    cat: '4xx',
+    name: '415 Unsupported Media Type',
+    desc: 'POST with an unrecognized Content-Type.',
+    method: 'POST', path: '/rsa', headers: { 'Content-Type': 'application/x-unknown-type-xyz' }, body: 'data', expect: '415',
+  },
+  {
+    id: '416_bad_range',
+    cat: '4xx',
+    name: '416 Range Not Satisfiable',
+    desc: 'Byte range that exceeds the resource size.',
+    method: 'GET', path: '/rsa', headers: { 'Range': 'bytes=9999999999-9999999999' }, expect: '416',
+  },
+  {
+    id: '429_rate_limit',
+    cat: '4xx',
+    name: '429 Rate Limit (×15 rapid)',
+    desc: 'Fire 15 concurrent requests to trigger the rate-limiter.',
+    method: 'GET', path: '/rsa', headers: {}, expect: '429', repeat: 15,
+  },
+  {
+    id: '431_large_header',
+    cat: '4xx',
+    name: '431 Request Header Fields Too Large',
+    desc: 'Single custom header padded to 16 KB.',
+    method: 'GET', path: '/rsa', headers: { 'X-Custom-Oversize': 'B'.repeat(16 * 1024) }, expect: '431',
+  },
+
+  // ── 5xx ──────────────────────────────────────────────────────────────
+  {
+    id: '500_trigger',
+    cat: '5xx',
+    name: '500 Internal Server Error',
+    desc: 'Crafted payload that may cause the origin to throw an unhandled exception.',
+    method: 'POST', path: '/rsa', headers: { 'Content-Type': 'application/json' }, body: '{"__proto__":{"polluted":true},"constructor":{"prototype":{"x":1}}}', expect: '500',
+  },
+  {
+    id: '502_bad_gateway',
+    cat: '5xx',
+    name: '502 Bad Gateway',
+    desc: 'Route to a path configured to proxy to an invalid upstream.',
+    method: 'GET', path: '/rsa/upstream-error', headers: {}, expect: '502',
+  },
+  {
+    id: '503_overload',
+    cat: '5xx',
+    name: '503 Service Unavailable',
+    desc: 'Heavy concurrent burst to push the origin into an overload state.',
+    method: 'GET', path: '/rsa', headers: {}, expect: '503', repeat: 30,
+  },
+  {
+    id: '504_gateway_timeout',
+    cat: '5xx',
+    name: '504 Gateway Timeout',
+    desc: 'Request to a slow-response path that exceeds the CDN read timeout.',
+    method: 'GET', path: '/rsa/slow-origin', headers: { 'X-Simulate-Delay': '60000' }, expect: '504',
+  },
+
+  // ── 0xx / Network errors ─────────────────────────────────────────────
+  {
+    id: '0xx_timeout',
+    cat: '0xx',
+    name: '0xx Connection Timeout',
+    desc: 'Force a client-side timeout by setting timeoutMs to 1 ms.',
+    method: 'GET', path: '/rsa', headers: {}, expect: '0 (timeout)', timeoutMs: 1,
+  },
+  {
+    id: '0xx_null_byte',
+    cat: '0xx',
+    name: '0xx Null Byte in URL',
+    desc: 'URL containing a percent-encoded null byte — may cause a parse error.',
+    method: 'GET', path: '/rsa/%00secret', headers: {}, expect: '0 / 400',
+  },
+  {
+    id: '0xx_path_traversal',
+    cat: '0xx',
+    name: '0xx Path Traversal Attempt',
+    desc: 'Encoded path-traversal sequence — WAF may drop the connection.',
+    method: 'GET', path: '/rsa/..%2F..%2Fetc%2Fpasswd', headers: {}, expect: '0 / 400',
+  },
+  {
+    id: '0xx_double_slash',
+    cat: '0xx',
+    name: '0xx Double-Slash Confusion',
+    desc: 'Double slashes that may confuse routing or normalization logic.',
+    method: 'GET', path: '//rsa//test', headers: {}, expect: '0 / 3xx / 404',
+  },
+];
+
+// ── State ────────────────────────────────────────────────────────────────────
+const collected = [];
+let activeFilter = 'All';
+
+// ── Rendering ────────────────────────────────────────────────────────────────
+function badgeClass(status) {
+  if (status === 0 || status === '0' || String(status).startsWith('0')) return 's-0xx';
+  const n = parseInt(status);
+  if (n >= 200 && n < 300) return 's-2xx';
+  if (n >= 300 && n < 400) return 's-3xx';
+  if (n >= 400 && n < 500) return 's-4xx';
+  if (n >= 500) return 's-5xx';
+  return 's-0xx';
+}
+
+function esc(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function renderTabs() {
+  const cats = ['All', '2xx', '3xx', '4xx', '5xx', '0xx'];
+  document.getElementById('tabs').innerHTML = cats.map(c =>
+    `<div class="tab ${c === activeFilter ? 'active' : ''}" onclick="setFilter('${c}')">${c} ${c === 'All' ? '' : ''}</div>`
+  ).join('');
+}
+
+function setFilter(cat) {
+  activeFilter = cat;
+  renderTabs();
+  document.querySelectorAll('.card').forEach(card => {
+    const c = card.dataset.cat;
+    card.classList.toggle('hidden', cat !== 'All' && c !== cat);
+  });
+}
+
+function renderCards() {
+  document.getElementById('grid').innerHTML = SCENARIOS.map(s => {
+    const pathDisplay = s.path.length > 32 ? s.path.slice(0, 32) + '…' : s.path;
+    const headerLines = Object.entries(s.headers)
+      .slice(0, 2)
+      .map(([k, v]) => `<span style="color:#7dd3fc">${esc(k)}</span>: ${esc(v.length > 28 ? v.slice(0,28)+'…' : v)}`)
+      .join('<br>');
+    return `
+    <div class="card ${activeFilter !== 'All' && s.cat !== activeFilter ? 'hidden' : ''}" id="card-${s.id}" data-cat="${s.cat}">
+      <div class="card-header">
+        <div class="card-name">${esc(s.name)}</div>
+        <button class="btn-run-card" id="rbtn-${s.id}" onclick="runOne('${s.id}')">&#9654; Run</button>
+      </div>
+      <div class="card-desc">${esc(s.desc)}</div>
+      <div class="card-tags">
+        <span class="tag t-method">${s.method}</span>
+        <span class="tag t-cat">${s.cat}</span>
+        <span class="tag t-expect">expect ${esc(s.expect)}</span>
+        <span class="tag t-path">${esc(pathDisplay)}</span>
+        ${s.repeat ? `<span class="tag" style="background:#1e2d1e;color:#86efac">×${s.repeat}</span>` : ''}
+        ${s.timeoutMs && s.timeoutMs <= 100 ? `<span class="tag" style="background:#2d1e2e;color:#e879f9">timeout ${s.timeoutMs}ms</span>` : ''}
+      </div>
+      ${headerLines ? `<div style="font-size:0.7rem;font-family:monospace;color:#4b5563;margin-bottom:0.5rem">${headerLines}</div>` : ''}
+      <div class="card-result" id="res-${s.id}"></div>
+    </div>`;
+  }).join('');
+}
+
+// ── Running ───────────────────────────────────────────────────────────────────
+async function proxyRequest(url, method, headers, body, timeoutMs = 10000) {
+  const resp = await fetch('/api/cdn-proxy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, method, headers, body, timeoutMs }),
+  });
+  return resp.json();
+}
+
+async function runOne(id) {
+  const s = SCENARIOS.find(x => x.id === id);
+  if (!s) return;
+
+  const card = document.getElementById(`card-${s.id}`);
+  const resEl = document.getElementById(`res-${s.id}`);
+  const btn   = document.getElementById(`rbtn-${s.id}`);
+
+  card.className = `card${activeFilter !== 'All' && s.cat !== activeFilter ? ' hidden' : ''} running`;
+  resEl.className = 'card-result visible';
+  resEl.innerHTML = '<span class="spinner"></span> Sending request…';
+  btn.disabled = true;
+
+  const url = BASE + s.path;
+  let status = null, refId = null, netErr = null;
+
+  try {
+    let data;
+    if (s.repeat) {
+      const reqs = Array.from({ length: s.repeat }, () =>
+        proxyRequest(url, s.method, s.headers, s.body, s.timeoutMs)
+      );
+      const responses = await Promise.all(reqs);
+      // pick the most interesting response (highest status or with refId)
+      for (const r of responses) {
+        const rid = r.headers?.[GRN_HEADER];
+        if (!refId && rid) refId = rid;
+        if (!status || r.status > status) status = r.status;
+        if (r.isTimeout || r.networkError) netErr = r.networkError || 'Timeout';
+      }
+      if (!refId) {
+        for (const r of responses) {
+          refId = extractRefFromBody(r.body);
+          if (refId) break;
+        }
+      }
+    } else {
+      data = await proxyRequest(url, s.method, s.headers, s.body, s.timeoutMs);
+      status = data.status;
+      refId = data.headers?.[GRN_HEADER] || extractRefFromBody(data.body);
+      if (data.isTimeout || data.networkError) netErr = data.networkError || 'Timeout';
+    }
+  } catch (e) {
+    netErr = e.message;
+    status = 0;
+  }
+
+  const displayStatus = netErr && status === 0 ? '0 (network error)' : status;
+  const bc = badgeClass(status);
+  card.className = `card${activeFilter !== 'All' && s.cat !== activeFilter ? ' hidden' : ''} ${refId || netErr ? 'done-ok' : 'done-err'}`;
+
+  let html = `<div class="result-line"><span class="badge ${bc}">${esc(displayStatus)}</span>${netErr ? ` <span style="color:#9ca3af;font-size:0.7rem">${esc(netErr)}</span>` : ''}</div>`;
+  if (refId) {
+    html += `<div class="ref-row">
+      <span class="ref-label">Akamai-GRN0:</span>
+      <span class="ref-value">${esc(refId)}</span>
+      <button class="copy-btn" onclick="copyText('${esc(refId)}')">Copy</button>
+    </div>`;
+  } else {
+    html += `<div style="color:#374151;margin-top:0.3rem;font-size:0.7rem">No Akamai-GRN0 header in response</div>`;
+  }
+  resEl.innerHTML = html;
+  btn.disabled = false;
+
+  const entry = {
+    id: s.id,
+    scenario: s.name,
+    category: s.cat,
+    status: displayStatus,
+    refId: refId || null,
+    networkError: netErr || null,
+    timestamp: new Date().toISOString(),
+  };
+  collected.push(entry);
+  appendRow(entry);
+}
+
+function extractRefFromBody(body) {
+  if (!body) return null;
+  const m = body.match(/\d+\.[0-9a-f]+\.\d+\.[0-9a-f]+/i);
+  return m ? m[0] : null;
+}
+
+async function runAll() {
+  const btn = document.getElementById('runAllBtn');
+  btn.disabled = true;
+  const wrap = document.getElementById('progressWrap');
+  const fill = document.getElementById('progressFill');
+  const text = document.getElementById('progressText');
+  wrap.className = 'progress-wrap visible';
+
+  const list = activeFilter === 'All' ? SCENARIOS : SCENARIOS.filter(s => s.cat === activeFilter);
+  for (let i = 0; i < list.length; i++) {
+    text.textContent = `${i + 1} / ${list.length}`;
+    fill.style.width = `${((i) / list.length) * 100}%`;
+    await runOne(list[i].id);
+  }
+  fill.style.width = '100%';
+  text.textContent = `${list.length} / ${list.length} done`;
+  btn.disabled = false;
+  setTimeout(() => { wrap.className = 'progress-wrap'; }, 2500);
+}
+
+// ── Table ─────────────────────────────────────────────────────────────────────
+function appendRow(entry) {
+  const tbody = document.getElementById('tableBody');
+  const empty = tbody.querySelector('.empty-row');
+  if (empty) empty.remove();
+
+  const row = document.createElement('tr');
+  const time = new Date(entry.timestamp).toLocaleTimeString('en-US', { hour12: false });
+  row.innerHTML = `
+    <td style="color:#374151">${collected.length}</td>
+    <td>${esc(entry.scenario)}</td>
+    <td><span class="tag t-cat">${esc(entry.category)}</span></td>
+    <td><span class="badge ${badgeClass(parseInt(entry.status) || 0)}">${esc(entry.status)}</span></td>
+    <td class="${entry.refId ? 'ref-cell' : 'no-ref'}">
+      ${entry.refId
+        ? `${esc(entry.refId)} <button class="copy-btn" onclick="copyText('${esc(entry.refId)}')">Copy</button>`
+        : 'none'}
+    </td>
+    <td style="color:#4b5563;white-space:nowrap;font-size:0.72rem">${time}</td>
+    <td>
+      ${entry.refId
+        ? `<button class="btn-run-card" style="background:#1e3a5f;color:#7dd3fc" onclick="openResolutionAgent('${esc(entry.refId)}')">Open in Resolution Agent</button>`
+        : ''}
+    </td>`;
+  tbody.appendChild(row);
+}
+
+function openResolutionAgent(refId) {
+  window.open(
+    `https://resolution-agent-staging.a.dmz.appbattery.akadns.net/?ref=${encodeURIComponent(refId)}`,
+    '_blank'
+  );
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+function clearAll() {
+  collected.length = 0;
+  document.getElementById('tableBody').innerHTML =
+    '<tr class="empty-row"><td colspan="7">No results yet — run tests to collect Ref IDs</td></tr>';
+  document.querySelectorAll('.card').forEach(c => {
+    c.classList.remove('running','done-ok','done-err');
+  });
+  document.querySelectorAll('.card-result').forEach(r => {
+    r.className = 'card-result';
+    r.innerHTML = '';
+  });
+}
+
+function exportJSON() {
+  if (!collected.length) { showToast('No results to export', '#ef4444'); return; }
+  const blob = new Blob([JSON.stringify(collected, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `cdn-ref-ids-${Date.now()}.json`;
+  a.click();
+}
+
+function copyText(t) {
+  navigator.clipboard.writeText(t).then(() => showToast('Copied to clipboard!'));
+}
+
+function showToast(msg, color = '#22c55e') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.background = color;
+  el.className = 'toast show';
+  setTimeout(() => { el.className = 'toast'; }, 2200);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+renderTabs();
+renderCards();
+</script>
+</body>
+</html>
