@@ -186,27 +186,21 @@
       font-family: monospace;
     }
     .card-result.visible { display: block; }
-    .debug-toggle {
-      font-size: 0.68rem;
-      color: #374151;
-      cursor: pointer;
-      margin-top: 0.4rem;
-      user-select: none;
-    }
-    .debug-toggle:hover { color: #6b7280; }
-    .debug-block {
-      display: none;
-      margin-top: 0.4rem;
-      padding: 0.4rem;
-      background: #050510;
-      border-radius: 4px;
-      border-left: 2px solid #1e3a5f;
-      font-size: 0.68rem;
-      color: #475569;
-      word-break: break-all;
+    .root-cause {
+      margin-top: 0.45rem;
+      padding: 0.4rem 0.6rem;
+      background: #1a1a0a;
+      border-left: 2px solid #f97316;
+      border-radius: 0 4px 4px 0;
+      font-size: 0.75rem;
       line-height: 1.5;
     }
-    .debug-block.open { display: block; }
+    .root-cause-label {
+      color: #f97316;
+      font-weight: 700;
+      margin-right: 0.4rem;
+    }
+    .root-cause-text { color: #fde68a; }
     .result-line { margin-bottom: 0.25rem; }
     .ref-row {
       display: flex;
@@ -391,133 +385,133 @@ const GRN_HEADER = 'akamai-grn0'; // headers are lowercased
 const SCENARIOS = [
   // ── 2xx · Origin ─────────────────────────────────────────────────────
   {
-    id: 'ok_baseline',
-    cat: '2xx', src: 'origin',
+    id: 'ok_baseline', cat: '2xx', src: 'origin',
     name: 'Baseline GET',
     desc: 'Normal GET — origin returns 200 OK.',
     method: 'GET', path: '/rsa', headers: {}, expect: '200',
+    rootCause: 'Request successfully delivered to origin. No errors at CDN or server level.',
   },
   {
-    id: 'ok_head',
-    cat: '2xx', src: 'origin',
+    id: 'ok_head', cat: '2xx', src: 'origin',
     name: 'HEAD Request',
     desc: 'HEAD method — no body expected in response.',
     method: 'HEAD', path: '/rsa', headers: {}, expect: '200',
+    rootCause: 'HEAD request processed normally. Server returns headers only, no response body.',
   },
 
   // ── 3xx · Origin ─────────────────────────────────────────────────────
   {
-    id: 'redirect_slash',
-    cat: '3xx', src: 'origin',
+    id: 'redirect_slash', cat: '3xx', src: 'origin',
     name: '301 Trailing Slash Redirect',
     desc: 'Nginx redirects /rsa/ to /rsa (or vice versa).',
     method: 'GET', path: '/rsa/', headers: {}, expect: '301',
+    rootCause: 'Nginx trailing-slash normalization rule triggered. Client is permanently redirected to the canonical URL.',
   },
 
   // ── 4xx · CDN Edge (Akamai EdgeWorker on /rsa/sim-*) ─────────────────
   {
-    id: 'sim_400',
-    cat: '4xx', src: 'edge',
+    id: 'sim_400', cat: '4xx', src: 'edge',
     name: '400 Bad Request',
     desc: 'EdgeWorker intercepts /rsa/sim-400 and returns 400.',
     method: 'GET', path: '/rsa/sim-400', headers: {}, expect: '400',
+    rootCause: 'Akamai Edge rejected the request before reaching origin — malformed syntax or invalid request structure.',
   },
   {
-    id: 'sim_403',
-    cat: '4xx', src: 'edge',
+    id: 'sim_403', cat: '4xx', src: 'edge',
     name: '403 Forbidden',
     desc: 'EdgeWorker intercepts /rsa/sim-403 and returns 403.',
     method: 'GET', path: '/rsa/sim-403', headers: {}, expect: '403',
+    rootCause: 'Akamai Edge denied access — client IP, token, or ACL policy blocked this request at the CDN layer.',
   },
   {
-    id: 'sim_405',
-    cat: '4xx', src: 'edge',
+    id: 'sim_405', cat: '4xx', src: 'edge',
     name: '405 Method Not Allowed',
     desc: 'EdgeWorker intercepts /rsa/sim-405 and returns 405.',
     method: 'GET', path: '/rsa/sim-405', headers: {}, expect: '405',
+    rootCause: 'Akamai Edge blocked the HTTP method — only GET/HEAD are permitted on this resource.',
   },
   {
-    id: 'sim_414',
-    cat: '4xx', src: 'edge',
+    id: 'sim_414', cat: '4xx', src: 'edge',
     name: '414 URI Too Long',
     desc: 'EdgeWorker intercepts /rsa/sim-414 and returns 414.',
     method: 'GET', path: '/rsa/sim-414', headers: {}, expect: '414',
+    rootCause: 'Akamai Edge rejected the request — URI length exceeded the CDN maximum allowed limit.',
   },
   {
-    id: 'sim_429',
-    cat: '4xx', src: 'edge',
+    id: 'sim_429', cat: '4xx', src: 'edge',
     name: '429 Too Many Requests',
     desc: 'EdgeWorker intercepts /rsa/sim-429 and returns 429.',
     method: 'GET', path: '/rsa/sim-429', headers: {}, expect: '429',
+    rootCause: 'Akamai Rate Control triggered — client exceeded the allowed request rate. Retry after the indicated interval.',
   },
   {
-    id: 'sim_431',
-    cat: '4xx', src: 'edge',
+    id: 'sim_431', cat: '4xx', src: 'edge',
     name: '431 Header Fields Too Large',
     desc: 'EdgeWorker intercepts /rsa/sim-431 and returns 431.',
     method: 'GET', path: '/rsa/sim-431', headers: {}, expect: '431',
+    rootCause: 'Akamai Edge rejected the request — combined request header size exceeded the CDN limit.',
   },
 
   // ── 4xx · Origin ─────────────────────────────────────────────────────
   {
-    id: '404_not_found',
-    cat: '4xx', src: 'origin',
+    id: '404_not_found', cat: '4xx', src: 'origin',
     name: '404 Not Found',
     desc: 'Path that does not exist on origin.',
     method: 'GET', path: '/rsa/no-such-resource-xyz9999', headers: {}, expect: '404',
+    rootCause: 'Requested path does not exist on the origin server. CDN forwarded the request and relayed the 404.',
   },
 
   // ── 5xx · Origin ─────────────────────────────────────────────────────
   {
-    id: '500_origin',
-    cat: '5xx', src: 'origin',
+    id: '500_origin', cat: '5xx', src: 'origin',
     name: '500 Internal Server Error',
     desc: 'Origin /rsa/error-500 returns 500.',
     method: 'GET', path: '/rsa/error-500', headers: {}, expect: '500',
+    rootCause: 'Origin server encountered an unhandled internal error. CDN received a 500 and relayed it to the client.',
   },
   {
-    id: '502_bad_gateway',
-    cat: '5xx', src: 'origin',
+    id: '502_bad_gateway', cat: '5xx', src: 'origin',
     name: '502 Bad Gateway',
     desc: 'Origin proxies /rsa/upstream-error to a dead port → 502.',
     method: 'GET', path: '/rsa/upstream-error', headers: {}, expect: '502',
+    rootCause: 'Origin tried to proxy to an upstream that refused the connection. CDN received an invalid response and returned 502.',
   },
   {
-    id: '503_origin',
-    cat: '5xx', src: 'origin',
+    id: '503_origin', cat: '5xx', src: 'origin',
     name: '503 Service Unavailable',
     desc: 'Origin /rsa/error-503 returns 503.',
     method: 'GET', path: '/rsa/error-503', headers: {}, expect: '503',
+    rootCause: 'Origin is temporarily unable to handle requests — server overloaded or under maintenance.',
   },
   {
-    id: '504_gateway_timeout',
-    cat: '5xx', src: 'origin',
+    id: '504_gateway_timeout', cat: '5xx', src: 'origin',
     name: '504 Gateway Timeout',
     desc: 'Origin /rsa/slow-origin hangs → CDN times out with 504.',
     method: 'GET', path: '/rsa/slow-origin', headers: {}, expect: '504',
+    rootCause: 'Origin did not respond within the CDN read-timeout window. Akamai gave up waiting and returned 504.',
   },
 
   // ── 0xx · Network / WAF drop ─────────────────────────────────────────
   {
-    id: '0xx_timeout',
-    cat: '0xx', src: 'network',
+    id: '0xx_timeout', cat: '0xx', src: 'network',
     name: '0xx Client Timeout',
     desc: 'Client-side timeout forced to 1 ms — connection never completes.',
     method: 'GET', path: '/rsa', headers: {}, expect: '0 (timeout)', timeoutMs: 1,
+    rootCause: 'Client-side connection timed out before the server could respond. No HTTP response was received.',
   },
   {
-    id: '0xx_null_byte',
-    cat: '0xx', src: 'network',
+    id: '0xx_null_byte', cat: '0xx', src: 'network',
     name: '0xx Null Byte in URL',
     desc: 'Percent-encoded null byte — WAF may drop the connection.',
     method: 'GET', path: '/rsa/%00secret', headers: {}, expect: '0 / 400',
+    rootCause: 'Null byte in URL detected by WAF — connection dropped or rejected before an HTTP response was sent.',
   },
   {
-    id: '0xx_path_traversal',
-    cat: '0xx', src: 'network',
+    id: '0xx_path_traversal', cat: '0xx', src: 'network',
     name: '0xx Path Traversal',
     desc: 'Encoded ../.. sequence — WAF may block before response.',
     method: 'GET', path: '/rsa/..%2F..%2Fetc%2Fpasswd', headers: {}, expect: '0 / 400',
+    rootCause: 'Path traversal sequence detected by WAF — request dropped at the edge before reaching origin.',
   },
 ];
 
@@ -653,7 +647,6 @@ async function runOne(id) {
   const bc = badgeClass(status);
   card.className = `card${activeFilter !== 'All' && s.cat !== activeFilter ? ' hidden' : ''} ${refId || netErr ? 'done-ok' : 'done-err'}`;
 
-  const uid = `dbg-${s.id}`;
   let html = `<div class="result-line"><span class="badge ${bc}">${esc(displayStatus)}</span>${netErr ? ` <span style="color:#9ca3af;font-size:0.7rem">${esc(netErr)}</span>` : ''}</div>`;
   if (refId) {
     html += `<div class="ref-row">
@@ -665,13 +658,9 @@ async function runOne(id) {
     html += `<div style="color:#374151;margin-top:0.3rem;font-size:0.7rem">No Akamai-GRN0 header in response</div>`;
   }
 
-  // Debug: show headers sent to CDN
-  if (lastRequestedHeaders) {
-    const hLines = Object.entries(lastRequestedHeaders)
-      .map(([k,v]) => `<span style="color:#7dd3fc">${esc(k)}</span>: ${esc(String(v).slice(0,80))}`)
-      .join('<br>');
-    html += `<div class="debug-toggle" onclick="document.getElementById('${uid}').classList.toggle('open')">▶ Headers sent to CDN</div>
-    <div class="debug-block" id="${uid}"><b style="color:#374151">→ ${esc(s.method)} https://testme0.akamaized-staging.net${esc(s.path.slice(0,60))}</b><br><br>${hLines}</div>`;
+  // Root cause
+  if (s.rootCause) {
+    html += `<div class="root-cause"><span class="root-cause-label">▶ Root Cause:</span><span class="root-cause-text">${esc(s.rootCause)}</span></div>`;
   }
 
   resEl.innerHTML = html;
