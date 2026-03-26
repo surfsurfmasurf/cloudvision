@@ -37,6 +37,35 @@
     }
     .target-pill .label { color: #4b5563; }
 
+    .ip-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+    }
+    .ip-bar label { font-size: 0.8rem; color: #6b7280; white-space: nowrap; }
+    .ip-input {
+      background: #1a1a2e;
+      border: 1px solid #2d2d4a;
+      border-radius: 6px;
+      color: #fbbf24;
+      padding: 0.35rem 0.7rem;
+      font-size: 0.82rem;
+      font-family: monospace;
+      width: 180px;
+    }
+    .ip-input:focus { outline: none; border-color: #f97316; }
+    .ip-hint { font-size: 0.72rem; color: #4b5563; }
+    .ip-badge {
+      font-size: 0.72rem;
+      padding: 0.2rem 0.5rem;
+      background: #1e2d1e;
+      color: #86efac;
+      border-radius: 4px;
+      font-family: monospace;
+    }
+
     .toolbar {
       display: flex;
       gap: 0.6rem;
@@ -154,6 +183,27 @@
       font-family: monospace;
     }
     .card-result.visible { display: block; }
+    .debug-toggle {
+      font-size: 0.68rem;
+      color: #374151;
+      cursor: pointer;
+      margin-top: 0.4rem;
+      user-select: none;
+    }
+    .debug-toggle:hover { color: #6b7280; }
+    .debug-block {
+      display: none;
+      margin-top: 0.4rem;
+      padding: 0.4rem;
+      background: #050510;
+      border-radius: 4px;
+      border-left: 2px solid #1e3a5f;
+      font-size: 0.68rem;
+      color: #475569;
+      word-break: break-all;
+      line-height: 1.5;
+    }
+    .debug-block.open { display: block; }
     .result-line { margin-bottom: 0.25rem; }
     .ref-row {
       display: flex;
@@ -275,6 +325,12 @@
     https://testme0.akamaized-staging.net
   </div>
 </header>
+
+<div class="ip-bar">
+  <label>Spoof Client IP:</label>
+  <input class="ip-input" id="spoofIp" type="text" value="23.50.60.214" placeholder="e.g. 23.50.60.214" />
+  <span class="ip-hint">Injected as <span class="ip-badge">True-Client-IP</span> <span class="ip-badge">X-Forwarded-For</span> <span class="ip-badge">X-Real-IP</span> on every CDN request</span>
+</div>
 
 <div class="toolbar">
   <button class="btn btn-run"   id="runAllBtn" onclick="runAll()">&#9654; Run All Tests</button>
@@ -611,11 +667,15 @@ function renderCards() {
 }
 
 // ── Running ───────────────────────────────────────────────────────────────────
+function getSpoofIp() {
+  return document.getElementById('spoofIp').value.trim() || null;
+}
+
 async function proxyRequest(url, method, headers, body, timeoutMs = 10000) {
   const resp = await fetch('/api/cdn-proxy', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url, method, headers, body, timeoutMs }),
+    body: JSON.stringify({ url, method, headers, body, timeoutMs, spoofIp: getSpoofIp() }),
   });
   return resp.json();
 }
@@ -634,7 +694,7 @@ async function runOne(id) {
   btn.disabled = true;
 
   const url = BASE + s.path;
-  let status = null, refId = null, netErr = null;
+  let status = null, refId = null, netErr = null, lastRequestedHeaders = null;
 
   try {
     let data;
@@ -649,6 +709,7 @@ async function runOne(id) {
         if (!refId && rid) refId = rid;
         if (!status || r.status > status) status = r.status;
         if (r.isTimeout || r.networkError) netErr = r.networkError || 'Timeout';
+        if (!lastRequestedHeaders && r.requestedHeaders) lastRequestedHeaders = r.requestedHeaders;
       }
       if (!refId) {
         for (const r of responses) {
@@ -661,6 +722,7 @@ async function runOne(id) {
       status = data.status;
       refId = data.headers?.[GRN_HEADER] || extractRefFromBody(data.body);
       if (data.isTimeout || data.networkError) netErr = data.networkError || 'Timeout';
+      lastRequestedHeaders = data.requestedHeaders || null;
     }
   } catch (e) {
     netErr = e.message;
@@ -671,6 +733,7 @@ async function runOne(id) {
   const bc = badgeClass(status);
   card.className = `card${activeFilter !== 'All' && s.cat !== activeFilter ? ' hidden' : ''} ${refId || netErr ? 'done-ok' : 'done-err'}`;
 
+  const uid = `dbg-${s.id}`;
   let html = `<div class="result-line"><span class="badge ${bc}">${esc(displayStatus)}</span>${netErr ? ` <span style="color:#9ca3af;font-size:0.7rem">${esc(netErr)}</span>` : ''}</div>`;
   if (refId) {
     html += `<div class="ref-row">
@@ -681,6 +744,16 @@ async function runOne(id) {
   } else {
     html += `<div style="color:#374151;margin-top:0.3rem;font-size:0.7rem">No Akamai-GRN0 header in response</div>`;
   }
+
+  // Debug: show headers sent to CDN
+  if (lastRequestedHeaders) {
+    const hLines = Object.entries(lastRequestedHeaders)
+      .map(([k,v]) => `<span style="color:#7dd3fc">${esc(k)}</span>: ${esc(String(v).slice(0,80))}`)
+      .join('<br>');
+    html += `<div class="debug-toggle" onclick="document.getElementById('${uid}').classList.toggle('open')">▶ Headers sent to CDN</div>
+    <div class="debug-block" id="${uid}"><b style="color:#374151">→ ${esc(s.method)} https://testme0.akamaized-staging.net${esc(s.path.slice(0,60))}</b><br><br>${hLines}</div>`;
+  }
+
   resEl.innerHTML = html;
   btn.disabled = false;
 

@@ -7,10 +7,18 @@ app.use(express.static("public"));
 const ALLOWED_HOST = "testme0.akamaized-staging.net";
 
 app.post("/api/cdn-proxy", async (req, res) => {
-  const { url, method = "GET", headers = {}, body, timeoutMs = 10000 } = req.body;
+  const { url, method = "GET", headers = {}, body, timeoutMs = 10000, spoofIp } = req.body;
 
   if (!url || !url.includes(ALLOWED_HOST)) {
     return res.status(400).json({ error: `Only ${ALLOWED_HOST} URLs are allowed` });
+  }
+
+  // Build final headers: inject IP spoofing headers if spoofIp provided
+  const finalHeaders = { ...headers };
+  if (spoofIp) {
+    finalHeaders["True-Client-IP"] = spoofIp;
+    finalHeaders["X-Forwarded-For"] = spoofIp;
+    finalHeaders["X-Real-IP"] = spoofIp;
   }
 
   const controller = new AbortController();
@@ -19,7 +27,7 @@ app.post("/api/cdn-proxy", async (req, res) => {
   try {
     const fetchOptions = {
       method,
-      headers,
+      headers: finalHeaders,
       redirect: "manual",
       signal: controller.signal,
     };
@@ -27,6 +35,7 @@ app.post("/api/cdn-proxy", async (req, res) => {
       fetchOptions.body = body;
     }
 
+    console.log(`[proxy] ${method} ${url} | spoofIp=${spoofIp || "none"}`);
     const response = await fetch(url, fetchOptions);
     clearTimeout(timer);
 
@@ -39,6 +48,7 @@ app.post("/api/cdn-proxy", async (req, res) => {
       statusText: response.statusText,
       headers: responseHeaders,
       body: responseBody,
+      requestedHeaders: finalHeaders, // echo back what we actually sent
     });
   } catch (error) {
     clearTimeout(timer);
@@ -50,6 +60,7 @@ app.post("/api/cdn-proxy", async (req, res) => {
       body: "",
       networkError: error.message,
       isTimeout,
+      requestedHeaders: finalHeaders,
     });
   }
 });
