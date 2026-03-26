@@ -1,15 +1,19 @@
 import express from "express";
 import https from "https";
 import dns from "dns/promises";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
-app.use(express.static("public"));
+app.use(express.static(path.join(__dirname, "public")));
 
-const STAGING_HOST = "testme0.akamaized-staging.net"; // DNS resolved to get edge IP
-const CDN_HOST     = "testme0.akamaized.net";          // Host header + SNI
+const STAGING_HOST = "testme0.akamaized-staging.net";
+const CDN_HOST     = "testme0.akamaized.net";
 
-// Resolve staging hostname once and cache
+// Cache edge IP (works across warm invocations; re-resolved per cold start)
 let edgeIp = null;
 async function getEdgeIp() {
   if (edgeIp) return edgeIp;
@@ -19,10 +23,9 @@ async function getEdgeIp() {
   return edgeIp;
 }
 
-// Expose resolved IP to the UI
 app.get("/api/edge-ip", async (req, res) => {
   try {
-    edgeIp = null; // force re-resolve on each call
+    edgeIp = null; // force re-resolve on each UI call
     const ip = await getEdgeIp();
     res.json({ ip, stagingHost: STAGING_HOST, cdnHost: CDN_HOST });
   } catch (e) {
@@ -33,17 +36,13 @@ app.get("/api/edge-ip", async (req, res) => {
 function makeRequest({ ip, path, method, headers, body, timeoutMs }) {
   return new Promise((resolve, reject) => {
     const url = new URL(`https://${CDN_HOST}${path}`);
-
     const options = {
-      hostname: ip,          // connect to staging edge IP directly
+      hostname: ip,
       port: 443,
       path: url.pathname + url.search,
       method,
-      headers: {
-        ...headers,
-        "Host": CDN_HOST,   // override Host
-      },
-      servername: CDN_HOST, // TLS SNI
+      headers: { ...headers, "Host": CDN_HOST },
+      servername: CDN_HOST,
       rejectUnauthorized: true,
       timeout: timeoutMs,
     };
@@ -51,16 +50,14 @@ function makeRequest({ ip, path, method, headers, body, timeoutMs }) {
     const req = https.request(options, (res) => {
       let data = "";
       res.on("data", chunk => { data += chunk; });
-      res.on("end", () => {
-        resolve({
-          status: res.statusCode,
-          statusText: res.statusMessage,
-          headers: res.headers,
-          body: data,
-          requestedHeaders: options.headers,
-          connectedIp: ip,
-        });
-      });
+      res.on("end", () => resolve({
+        status: res.statusCode,
+        statusText: res.statusMessage,
+        headers: res.headers,
+        body: data,
+        requestedHeaders: options.headers,
+        connectedIp: ip,
+      }));
     });
 
     req.on("timeout", () => {
@@ -69,9 +66,7 @@ function makeRequest({ ip, path, method, headers, body, timeoutMs }) {
     });
     req.on("error", reject);
 
-    if (body && !["GET", "HEAD"].includes(method.toUpperCase())) {
-      req.write(body);
-    }
+    if (body && !["GET", "HEAD"].includes(method.toUpperCase())) req.write(body);
     req.end();
   });
 }
@@ -88,8 +83,7 @@ app.post("/api/cdn-proxy", async (req, res) => {
 
   try {
     const ip = await getEdgeIp();
-    console.log(`[proxy] ${method} https://${CDN_HOST}${path} → ${ip} | spoofIp: ${spoofIp || "none"}`);
-
+    console.log(`[proxy] ${method} https://${CDN_HOST}${path} → ${ip}`);
     const result = await makeRequest({ ip, path, method, headers: finalHeaders, body, timeoutMs });
     res.json(result);
   } catch (error) {
@@ -105,14 +99,19 @@ app.post("/api/cdn-proxy", async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 4000;
-app.listen(PORT, async () => {
-  console.log(`CDN Error Tester running at http://localhost:${PORT}`);
-  try {
-    const ip = await getEdgeIp();
-    console.log(`  Edge IP : ${ip} (via ${STAGING_HOST})`);
-    console.log(`  CDN Host: ${CDN_HOST}`);
-  } catch (e) {
-    console.warn(`  DNS resolve failed: ${e.message}`);
-  }
-});
+// Local dev only — Vercel handles listening in production
+if (!process.env.VERCEL) {
+  const PORT = process.env.PORT || 4000;
+  app.listen(PORT, async () => {
+    console.log(`CDN Error Tester running at http://localhost:${PORT}`);
+    try {
+      const ip = await getEdgeIp();
+      console.log(`  Edge IP : ${ip} (via ${STAGING_HOST})`);
+      console.log(`  CDN Host: ${CDN_HOST}`);
+    } catch (e) {
+      console.warn(`  DNS resolve failed: ${e.message}`);
+    }
+  });
+}
+
+export default app;
