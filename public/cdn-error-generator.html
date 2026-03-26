@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CDN Error Generator</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f0f23;
+      color: #e0e0e0;
+      min-height: 100vh;
+      padding: 2rem;
+    }
+    h1 {
+      font-size: 1.8rem;
+      margin-bottom: 0.3rem;
+      background: linear-gradient(135deg, #f97316, #ef4444);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .subtitle { color: #888; margin-bottom: 0.5rem; font-size: 0.9rem; }
+    .target-url {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: #1a1a3a;
+      border: 1px solid #333;
+      border-radius: 6px;
+      padding: 0.4rem 0.8rem;
+      font-size: 0.82rem;
+      color: #7dd3fc;
+      margin-bottom: 1.5rem;
+      font-family: monospace;
+    }
+    .target-url span { color: #64748b; }
+
+    .controls {
+      display: flex;
+      gap: 0.75rem;
+      margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .btn {
+      padding: 0.5rem 1.2rem;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    .btn:hover { opacity: 0.85; transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+    .btn-primary { background: #f97316; color: #fff; }
+    .btn-secondary { background: #334155; color: #e0e0e0; }
+    .btn-danger { background: #ef4444; color: #fff; }
+    .btn-sm {
+      padding: 0.3rem 0.7rem;
+      font-size: 0.78rem;
+    }
+
+    .scenarios-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+    .scenario-card {
+      background: #1a1a2e;
+      border: 1px solid #2a2a4a;
+      border-radius: 10px;
+      padding: 1rem;
+      transition: border-color 0.2s;
+    }
+    .scenario-card.running { border-color: #f97316; }
+    .scenario-card.success { border-color: #22c55e; }
+    .scenario-card.error-state { border-color: #ef4444; }
+    .scenario-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 0.5rem;
+    }
+    .scenario-name {
+      font-weight: 600;
+      font-size: 0.9rem;
+      color: #e2e8f0;
+    }
+    .scenario-desc {
+      font-size: 0.78rem;
+      color: #888;
+      margin-bottom: 0.6rem;
+      line-height: 1.4;
+    }
+    .scenario-meta {
+      display: flex;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+      margin-bottom: 0.75rem;
+    }
+    .tag {
+      font-size: 0.7rem;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      font-family: monospace;
+      font-weight: 600;
+    }
+    .tag-method { background: #1e3a5f; color: #7dd3fc; }
+    .tag-status { background: #2d1b1b; color: #fca5a5; }
+    .tag-path { background: #1a2d1a; color: #86efac; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .scenario-result {
+      margin-top: 0.6rem;
+      padding: 0.6rem;
+      background: #0d0d1a;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      font-family: monospace;
+      display: none;
+    }
+    .scenario-result.visible { display: block; }
+    .result-status { margin-bottom: 0.3rem; }
+    .ref-id-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 0.4rem;
+    }
+    .ref-id {
+      color: #fbbf24;
+      word-break: break-all;
+      flex: 1;
+    }
+    .copy-btn {
+      background: #374151;
+      border: none;
+      color: #9ca3af;
+      padding: 0.15rem 0.4rem;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 0.7rem;
+      white-space: nowrap;
+    }
+    .copy-btn:hover { background: #4b5563; color: #e5e7eb; }
+    .status-badge {
+      font-size: 0.75rem;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      font-weight: 700;
+    }
+    .s2xx { background: #14532d; color: #86efac; }
+    .s3xx { background: #1e3a5f; color: #93c5fd; }
+    .s4xx { background: #7f1d1d; color: #fca5a5; }
+    .s5xx { background: #431407; color: #fdba74; }
+    .s-err { background: #312e81; color: #c4b5fd; }
+
+    .spinner {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border: 2px solid #f9731644;
+      border-top-color: #f97316;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      vertical-align: middle;
+      margin-right: 4px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Results table */
+    .results-section { margin-top: 2rem; }
+    .results-section h2 {
+      font-size: 1.1rem;
+      margin-bottom: 1rem;
+      color: #94a3b8;
+    }
+    .table-wrap {
+      overflow-x: auto;
+      border-radius: 10px;
+      border: 1px solid #2a2a4a;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+    }
+    thead tr { background: #1a1a3a; }
+    th {
+      padding: 0.7rem 1rem;
+      text-align: left;
+      color: #94a3b8;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    tbody tr {
+      border-top: 1px solid #1e1e3a;
+      transition: background 0.1s;
+    }
+    tbody tr:hover { background: #1a1a2e; }
+    td {
+      padding: 0.6rem 1rem;
+      vertical-align: middle;
+    }
+    td.ref-id-cell {
+      font-family: monospace;
+      color: #fbbf24;
+      font-size: 0.75rem;
+    }
+    td.no-ref { color: #4b5563; font-style: italic; }
+    .empty-state {
+      text-align: center;
+      padding: 2rem;
+      color: #4b5563;
+      font-size: 0.85rem;
+    }
+
+    .progress-bar-wrap {
+      display: none;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    .progress-bar-wrap.visible { display: flex; }
+    .progress-bar {
+      flex: 1;
+      height: 4px;
+      background: #1e1e3a;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #f97316, #ef4444);
+      border-radius: 2px;
+      transition: width 0.3s;
+    }
+    .progress-label { font-size: 0.78rem; color: #64748b; white-space: nowrap; }
+
+    .toast {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      background: #22c55e;
+      color: #fff;
+      padding: 0.6rem 1rem;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: opacity 0.2s, transform 0.2s;
+      z-index: 999;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+  </style>
+</head>
+<body>
+
+<h1>CDN Error Generator</h1>
+<p class="subtitle">Akamai CDN 에러 시나리오를 시뮬레이션하고 Ref ID를 수집합니다</p>
+<div class="target-url">
+  <span>Target:</span>
+  https://testme0.akamaized.net/rsa
+</div>
+
+<div class="controls">
+  <button class="btn btn-primary" id="runAllBtn" onclick="runAll()">▶ Run All Tests</button>
+  <button class="btn btn-secondary" id="clearBtn" onclick="clearResults()">Clear Results</button>
+  <button class="btn btn-secondary" onclick="exportResults()">Export JSON</button>
+</div>
+
+<div class="progress-bar-wrap" id="progressWrap">
+  <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+  <div class="progress-label" id="progressLabel">0 / 0</div>
+</div>
+
+<div class="scenarios-grid" id="scenariosGrid"></div>
+
+<div class="results-section">
+  <h2>수집된 Ref ID 목록</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>시나리오</th>
+          <th>HTTP Status</th>
+          <th>Ref ID</th>
+          <th>시각</th>
+          <th>액션</th>
+        </tr>
+      </thead>
+      <tbody id="resultsBody">
+        <tr><td colspan="6" class="empty-state">테스트를 실행하면 결과가 여기에 표시됩니다</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const BASE_URL = 'https://testme0.akamaized.net/rsa';
+
+const SCENARIOS = [
+  {
+    id: 'baseline',
+    name: '정상 요청 (Baseline)',
+    desc: '기본 GET 요청 - 정상 응답 확인',
+    method: 'GET',
+    path: '/rsa',
+    headers: {},
+    expectedStatus: '2xx',
+  },
+  {
+    id: 'not_found',
+    name: '404 Not Found',
+    desc: '존재하지 않는 경로에 요청',
+    method: 'GET',
+    path: '/rsa/this-path-does-not-exist-xyz123',
+    headers: {},
+    expectedStatus: '404',
+  },
+  {
+    id: 'invalid_token',
+    name: '403 Invalid Token',
+    desc: '유효하지 않은 Authorization 토큰으로 요청',
+    method: 'GET',
+    path: '/rsa',
+    headers: { 'Authorization': 'Bearer invalid_token_abc123xyz' },
+    expectedStatus: '403',
+  },
+  {
+    id: 'empty_token',
+    name: '403 Empty Auth',
+    desc: '빈 Authorization 헤더로 요청',
+    method: 'GET',
+    path: '/rsa',
+    headers: { 'Authorization': 'Bearer ' },
+    expectedStatus: '403',
+  },
+  {
+    id: 'method_delete',
+    name: '405 Method Not Allowed (DELETE)',
+    desc: 'DELETE 메서드로 요청',
+    method: 'DELETE',
+    path: '/rsa',
+    headers: {},
+    expectedStatus: '405',
+  },
+  {
+    id: 'method_put',
+    name: '405 Method Not Allowed (PUT)',
+    desc: 'PUT 메서드로 요청',
+    method: 'PUT',
+    path: '/rsa',
+    headers: { 'Content-Type': 'application/json' },
+    expectedStatus: '405',
+  },
+  {
+    id: 'method_patch',
+    name: '405 Method Not Allowed (PATCH)',
+    desc: 'PATCH 메서드로 요청',
+    method: 'PATCH',
+    path: '/rsa',
+    headers: { 'Content-Type': 'application/json' },
+    expectedStatus: '405',
+  },
+  {
+    id: 'bad_range',
+    name: '416 Range Not Satisfiable',
+    desc: '존재하지 않는 범위 요청 (Range 헤더)',
+    method: 'GET',
+    path: '/rsa',
+    headers: { 'Range': 'bytes=9999999999-9999999999' },
+    expectedStatus: '416',
+  },
+  {
+    id: 'bad_accept',
+    name: '406 Not Acceptable',
+    desc: '서버가 제공하지 않는 Accept 형식 요청',
+    method: 'GET',
+    path: '/rsa',
+    headers: { 'Accept': 'application/x-unsupported-format-xyz' },
+    expectedStatus: '406',
+  },
+  {
+    id: 'long_url',
+    name: '414 URI Too Long',
+    desc: '매우 긴 쿼리 파라미터로 요청 (~8KB)',
+    method: 'GET',
+    path: '/rsa?' + 'a'.repeat(8000),
+    headers: {},
+    expectedStatus: '414',
+  },
+  {
+    id: 'blocked_ip',
+    name: '403 Blocked IP',
+    desc: 'X-Forwarded-For에 차단된 IP 주소 포함',
+    method: 'GET',
+    path: '/rsa',
+    headers: { 'X-Forwarded-For': '192.0.2.1' },
+    expectedStatus: '403',
+  },
+  {
+    id: 'bad_host',
+    name: '400 Bad Host Header',
+    desc: '잘못된 Host 헤더로 요청',
+    method: 'GET',
+    path: '/rsa',
+    headers: { 'Host': 'invalid..host..name' },
+    expectedStatus: '400',
+  },
+  {
+    id: 'precondition_fail',
+    name: '412 Precondition Failed',
+    desc: '잘못된 If-Match ETag 조건으로 요청',
+    method: 'GET',
+    path: '/rsa',
+    headers: { 'If-Match': '"wrong-etag-value-xyz"' },
+    expectedStatus: '412',
+  },
+  {
+    id: 'rate_limit',
+    name: '429 Rate Limit (x10 rapid)',
+    desc: '10회 연속 빠른 요청으로 레이트 리밋 유발',
+    method: 'GET',
+    path: '/rsa',
+    headers: {},
+    expectedStatus: '429',
+    repeat: 10,
+  },
+];
+
+// State
+const results = [];
+let scenarioResults = {};
+
+function refIdRegex() {
+  return /\d+\.[0-9a-f]+\.\d+\.[0-9a-f]+/gi;
+}
+
+function extractRefId(body, headers) {
+  // Check headers first (e.g., X-Cache-Key, X-Reference-ID)
+  for (const [k, v] of Object.entries(headers || {})) {
+    const m = v.match(refIdRegex());
+    if (m) return m[0];
+  }
+  // Then check body
+  if (body) {
+    const m = body.match(refIdRegex());
+    if (m) return m[0];
+  }
+  return null;
+}
+
+function statusClass(status) {
+  if (!status || status === 'ERR') return 's-err';
+  if (status >= 200 && status < 300) return 's2xx';
+  if (status >= 300 && status < 400) return 's3xx';
+  if (status >= 400 && status < 500) return 's4xx';
+  if (status >= 500) return 's5xx';
+  return 's-err';
+}
+
+async function runScenario(scenario) {
+  const card = document.getElementById(`card-${scenario.id}`);
+  const resultEl = document.getElementById(`result-${scenario.id}`);
+  const runBtn = document.getElementById(`btn-${scenario.id}`);
+
+  card.className = 'scenario-card running';
+  resultEl.className = 'scenario-result visible';
+  resultEl.innerHTML = `<span class="spinner"></span> 요청 중...`;
+  if (runBtn) runBtn.disabled = true;
+
+  const url = 'https://testme0.akamaized.net' + scenario.path;
+  let finalStatus = null, refId = null, errorMsg = null;
+
+  try {
+    if (scenario.repeat) {
+      // Fire multiple requests in parallel
+      const requests = Array.from({ length: scenario.repeat }, () =>
+        fetch('/api/cdn-proxy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, method: scenario.method, headers: scenario.headers }),
+        }).then(r => r.json())
+      );
+      const responses = await Promise.all(requests);
+      // Use the last response that has a ref ID, or the last 429
+      for (const r of responses) {
+        if (r.status === 429 || !finalStatus) {
+          finalStatus = r.status;
+          refId = refId || extractRefId(r.body, r.headers);
+        }
+        if (!refId) refId = extractRefId(r.body, r.headers);
+      }
+      if (!refId) {
+        // Just use the last one
+        const last = responses[responses.length - 1];
+        finalStatus = last.status;
+        refId = extractRefId(last.body, last.headers);
+      }
+    } else {
+      const res = await fetch('/api/cdn-proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, method: scenario.method, headers: scenario.headers }),
+      });
+      const data = await res.json();
+
+      if (data.error) {
+        errorMsg = data.error;
+      } else {
+        finalStatus = data.status;
+        refId = extractRefId(data.body, data.headers);
+      }
+    }
+  } catch (e) {
+    errorMsg = e.message;
+  }
+
+  // Build result HTML
+  let html = '';
+  if (errorMsg) {
+    card.className = 'scenario-card error-state';
+    html = `<div class="result-status"><span class="status-badge s-err">ERR</span> ${escHtml(errorMsg)}</div>`;
+  } else {
+    card.className = 'scenario-card success';
+    html = `<div class="result-status"><span class="status-badge ${statusClass(finalStatus)}">${finalStatus}</span> ${getStatusText(finalStatus)}</div>`;
+    if (refId) {
+      html += `<div class="ref-id-row">
+        <span style="color:#64748b">Ref ID:</span>
+        <span class="ref-id">${escHtml(refId)}</span>
+        <button class="copy-btn" onclick="copyText('${escHtml(refId)}')">복사</button>
+      </div>`;
+    } else {
+      html += `<div style="color:#64748b;margin-top:0.3rem;font-size:0.75rem">Ref ID 없음 (에러 미발생 또는 응답에 포함되지 않음)</div>`;
+    }
+  }
+  resultEl.innerHTML = html;
+  if (runBtn) runBtn.disabled = false;
+
+  // Save result
+  const resultEntry = {
+    scenario: scenario.name,
+    scenarioId: scenario.id,
+    status: finalStatus || 'ERR',
+    refId: refId || null,
+    error: errorMsg || null,
+    timestamp: new Date().toISOString(),
+  };
+  results.push(resultEntry);
+  scenarioResults[scenario.id] = resultEntry;
+  appendResultRow(resultEntry);
+}
+
+async function runAll() {
+  const btn = document.getElementById('runAllBtn');
+  btn.disabled = true;
+
+  const wrap = document.getElementById('progressWrap');
+  const fill = document.getElementById('progressFill');
+  const label = document.getElementById('progressLabel');
+  wrap.className = 'progress-bar-wrap visible';
+
+  for (let i = 0; i < SCENARIOS.length; i++) {
+    label.textContent = `${i + 1} / ${SCENARIOS.length}`;
+    fill.style.width = `${((i) / SCENARIOS.length) * 100}%`;
+    await runScenario(SCENARIOS[i]);
+  }
+
+  fill.style.width = '100%';
+  label.textContent = `${SCENARIOS.length} / ${SCENARIOS.length} 완료`;
+  btn.disabled = false;
+  setTimeout(() => { wrap.className = 'progress-bar-wrap'; }, 2000);
+}
+
+function clearResults() {
+  results.length = 0;
+  scenarioResults = {};
+  document.getElementById('resultsBody').innerHTML =
+    '<tr><td colspan="6" class="empty-state">테스트를 실행하면 결과가 여기에 표시됩니다</td></tr>';
+
+  // Reset cards
+  document.querySelectorAll('.scenario-card').forEach(c => {
+    c.className = 'scenario-card';
+  });
+  document.querySelectorAll('.scenario-result').forEach(r => {
+    r.className = 'scenario-result';
+    r.innerHTML = '';
+  });
+}
+
+function appendResultRow(entry) {
+  const tbody = document.getElementById('resultsBody');
+  // Remove empty state row
+  const empty = tbody.querySelector('.empty-state');
+  if (empty) empty.closest('tr').remove();
+
+  const row = document.createElement('tr');
+  const idx = results.length;
+  const time = new Date(entry.timestamp).toLocaleTimeString('ko-KR');
+  const sc = statusClass(typeof entry.status === 'number' ? entry.status : 0);
+
+  row.innerHTML = `
+    <td style="color:#64748b">${idx}</td>
+    <td>${escHtml(entry.scenario)}</td>
+    <td><span class="status-badge ${sc}">${entry.status}</span></td>
+    <td class="${entry.refId ? 'ref-id-cell' : 'no-ref'}">
+      ${entry.refId
+        ? `${escHtml(entry.refId)} <button class="copy-btn" onclick="copyText('${escHtml(entry.refId)}')">복사</button>`
+        : '없음'}
+    </td>
+    <td style="color:#64748b;white-space:nowrap">${time}</td>
+    <td>
+      ${entry.refId
+        ? `<button class="btn btn-sm btn-secondary" onclick="testWithResolutionAgent('${escHtml(entry.refId)}')">Resolution Agent 테스트</button>`
+        : ''}
+    </td>
+  `;
+  tbody.appendChild(row);
+}
+
+function testWithResolutionAgent(refId) {
+  const url = `https://resolution-agent-staging.a.dmz.appbattery.akadns.net/?ref=${encodeURIComponent(refId)}`;
+  window.open(url, '_blank');
+}
+
+function exportResults() {
+  if (results.length === 0) { showToast('결과가 없습니다', '#ef4444'); return; }
+  const blob = new Blob([JSON.stringify(results, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `cdn-error-results-${Date.now()}.json`;
+  a.click();
+}
+
+function copyText(text) {
+  navigator.clipboard.writeText(text).then(() => showToast('Ref ID 복사됨!'));
+}
+
+function showToast(msg, color = '#22c55e') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.background = color;
+  t.className = 'toast show';
+  setTimeout(() => { t.className = 'toast'; }, 2000);
+}
+
+function escHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function getStatusText(code) {
+  const map = {
+    200:'OK', 201:'Created', 204:'No Content',
+    301:'Moved Permanently', 302:'Found', 304:'Not Modified',
+    400:'Bad Request', 401:'Unauthorized', 403:'Forbidden',
+    404:'Not Found', 405:'Method Not Allowed', 406:'Not Acceptable',
+    408:'Request Timeout', 412:'Precondition Failed',
+    414:'URI Too Long', 416:'Range Not Satisfiable', 429:'Too Many Requests',
+    500:'Internal Server Error', 502:'Bad Gateway',
+    503:'Service Unavailable', 504:'Gateway Timeout',
+  };
+  return map[code] || '';
+}
+
+// Render scenario cards
+function renderScenarios() {
+  const grid = document.getElementById('scenariosGrid');
+  grid.innerHTML = SCENARIOS.map(s => `
+    <div class="scenario-card" id="card-${s.id}">
+      <div class="scenario-header">
+        <div class="scenario-name">${escHtml(s.name)}</div>
+        <button class="btn btn-sm btn-secondary" id="btn-${s.id}" onclick="runScenario(SCENARIOS.find(x=>x.id==='${s.id}'))">▶ Run</button>
+      </div>
+      <div class="scenario-desc">${escHtml(s.desc)}</div>
+      <div class="scenario-meta">
+        <span class="tag tag-method">${s.method}</span>
+        <span class="tag tag-status">예상: ${s.expectedStatus}</span>
+        <span class="tag tag-path">${escHtml(s.path.length > 30 ? s.path.slice(0,30)+'…' : s.path)}</span>
+        ${s.repeat ? `<span class="tag" style="background:#2d1f4a;color:#c4b5fd">×${s.repeat}</span>` : ''}
+      </div>
+      ${Object.keys(s.headers).length > 0
+        ? `<div style="font-size:0.72rem;color:#64748b;font-family:monospace;margin-bottom:0.5rem">${
+            Object.entries(s.headers).map(([k,v]) =>
+              `<span style="color:#7dd3fc">${escHtml(k)}</span>: ${escHtml(v.length > 30 ? v.slice(0,30)+'…' : v)}`
+            ).join('<br>')
+          }</div>`
+        : ''}
+      <div class="scenario-result" id="result-${s.id}"></div>
+    </div>
+  `).join('');
+}
+
+renderScenarios();
+</script>
+</body>
+</html>
